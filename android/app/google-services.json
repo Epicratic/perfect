@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "213183884101",
+    "project_id": "perfect-net",
+    "storage_bucket": "perfect-net.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:213183884101:android:076fbb26525dd4c9a72c2c",
+        "android_client_info": {
+          "package_name": "com.perfect.tech"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAWVAGYhQtNDoBL-YQ7RF9IOet8vtigav0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

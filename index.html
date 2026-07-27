@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="fr" data-lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>PerfECT - Performance Evaluation & Communication Tech</title>
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- CDN Scripts for Visual Enhancements -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+
+  <!-- App Stylesheet -->
+  <link rel="stylesheet" href="./src/style.css">
+</head>
+<body>
+
+  <div id="app">
+    <!-- Desktop Preview Quick Control Bar -->
+    <div class="preview-control-bar">
+      <div class="preview-title">
+        <span>PerfECT App</span>
+        <span id="preview-active-screen-name">Tableau Général</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <select id="desktop-screen-switcher" class="screen-switcher-select">
+          <option value="login">🔐 1. Connexion / Auth</option>
+          <option value="dashboard" selected>📊 2. Tableau Général</option>
+          <option value="reporting">📋 3. Fiche de Reporting</option>
+          <option value="analytics">🗺️ 4. Tableau Détaillé & Carte</option>
+          <option value="profiles">👤 5. Profil Utilisateur</option>
+          <option value="pricing">💎 6. Plans & Tarifs</option>
+          <option value="admin">⚙️ 7. Portail Admin</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Mobile Device Frame -->
+    <div class="mobile-frame" id="mobile-app-shell">
+      <!-- Top Status Bar & Notch -->
+      <div class="mobile-notch"></div>
+      <div class="mobile-header-bar">
+        <span id="clock-time">09:41</span>
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <span>5G</span>
+          <span>100% 🔋</span>
+        </div>
+      </div>
+
+      <!-- App Header Container -->
+      <div id="app-header-mount"></div>
+
+      <!-- Main Scrollable Screen Body -->
+      <main id="app-body-mount" class="app-content-body"></main>
+
+      <!-- Floating Bottom Navigation Container -->
+      <div id="app-nav-mount"></div>
+    </div>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
