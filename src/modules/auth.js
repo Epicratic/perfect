@@ -26,12 +26,12 @@ export function renderAuthView(appState, translations) {
           <form id="login-form">
             <div class="form-group" style="text-align: left;">
               <label class="form-label">${t.emailLabel}</label>
-              <input type="email" id="login-email" class="form-control" value="jeanluc.moreau@perfect-tech.io" placeholder="${t.emailPlaceholder}" required />
+              <input type="email" id="login-email" class="form-control" placeholder="${t.emailPlaceholder}" required />
             </div>
 
             <div class="form-group" style="text-align: left;">
               <label class="form-label">${t.passwordLabel}</label>
-              <input type="password" class="form-control" value="••••••••" placeholder="${t.passwordPlaceholder}" required />
+              <input type="password" id="login-password" class="form-control" placeholder="${t.passwordPlaceholder}" required />
             </div>
 
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; font-size: 11px;">
@@ -66,9 +66,8 @@ export function renderAuthView(appState, translations) {
             <div class="form-group" style="text-align: left;">
               <label class="form-label">${t.roleSelectLabel} *</label>
               <select id="reg-role" class="form-control" required>
-                <option value="user">${t.roleEvaluator}</option>
-                <option value="enterprise">${t.roleEnterprise}</option>
-                <option value="citizen">${t.roleCitizen}</option>
+                <option value="contributeur">${t.roleEvaluator}</option>
+                <option value="entreprise">${t.roleEnterprise}</option>
               </select>
             </div>
 
@@ -114,6 +113,8 @@ export function renderAuthView(appState, translations) {
   `;
 }
 
+import { firebaseRegister, firebaseLogin } from '../config/firebase.js';
+
 export function attachAuthEvents(containerEl, onLoginSuccess, onAdminAccess, onToggleAuthMode) {
   // Tab Switchers
   const tabLogin = containerEl.querySelector('#tab-login-btn');
@@ -126,37 +127,155 @@ export function attachAuthEvents(containerEl, onLoginSuccess, onAdminAccess, onT
   if (toggleToReg) toggleToReg.addEventListener('click', (e) => { e.preventDefault(); onToggleAuthMode('register'); });
   if (toggleToLog) toggleToLog.addEventListener('click', (e) => { e.preventDefault(); onToggleAuthMode('login'); });
 
-  // Login Submit
+  // ── Helper: show inline error/success message ──────────────────────────────
+  function showMsg(form, text, isError = true) {
+    let msgEl = form.querySelector('.auth-msg');
+    if (!msgEl) {
+      msgEl = document.createElement('div');
+      msgEl.className = 'auth-msg';
+      msgEl.style.cssText = `margin: 8px 0 12px; padding: 10px 14px; border-radius: 10px; font-size: 12px; font-weight: 600; text-align: left;`;
+      form.insertBefore(msgEl, form.querySelector('button[type="submit"]'));
+    }
+    msgEl.textContent = text;
+    msgEl.style.background = isError ? '#FEE2E2' : '#D1FAE5';
+    msgEl.style.color = isError ? '#B91C1C' : '#065F46';
+  }
+
+  function setLoading(btn, loading) {
+    btn.disabled = loading;
+    btn.style.opacity = loading ? '0.7' : '1';
+    btn.textContent = loading ? '⏳ Chargement...' : btn.dataset.label;
+  }
+
+  // ── LOGIN FORM ─────────────────────────────────────────────────────────────
   const loginForm = containerEl.querySelector('#login-form');
   if (loginForm) {
-    loginForm.addEventListener('submit', (e) => {
-      e.preventDefault();
-      onLoginSuccess('user');
-    });
-  }
+    const submitBtn = loginForm.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.dataset.label = submitBtn.textContent;
 
-  // Register Submit
-  const regForm = containerEl.querySelector('#register-form');
-  if (regForm) {
-    regForm.addEventListener('submit', (e) => {
+    loginForm.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const pass = containerEl.querySelector('#reg-pass').value;
-      const confirm = containerEl.querySelector('#reg-confirm-pass').value;
-      if (pass !== confirm) {
-        alert("Les mots de passe ne correspondent pas.");
+      const email = (containerEl.querySelector('#login-email')?.value || '').trim();
+      const password = containerEl.querySelector('#login-password')?.value || '';
+
+      if (!email || !password) {
+        showMsg(loginForm, "Veuillez remplir tous les champs.");
         return;
       }
-      const fullName = containerEl.querySelector('#reg-fullname').value;
-      alert(`Compte créé avec succès pour ${fullName} ! Vous êtes maintenant connecté.`);
-      onLoginSuccess('user');
+
+      if (submitBtn) setLoading(submitBtn, true);
+
+      let result = null;
+      try {
+        result = await firebaseLogin({ email, password });
+      } catch (err) {
+        if (submitBtn) setLoading(submitBtn, false);
+        const errMsg = `❌ Erreur inattendue : ${err && err.message ? err.message : String(err)}`;
+        showMsg(loginForm, errMsg, true);
+        alert(errMsg);
+        return;
+      }
+
+      if (submitBtn) setLoading(submitBtn, false);
+
+      if (!result || !result.ok) {
+        const errMsg = (result && result.error) ? result.error : "Email ou mot de passe incorrect.";
+        showMsg(loginForm, `❌ ${errMsg}`, true);
+        alert(`❌ Échec de la connexion\n${errMsg}`);
+        return;
+      }
+
+      // Build user payload from Firestore profile data or Firebase user
+      const fbUser = result.user;
+      const profile = result.profileData || {};
+      const userPayload = {
+        id: fbUser.uid,
+        uid: fbUser.uid,
+        name: profile.name || fbUser.displayName || email.split('@')[0],
+        email: fbUser.email,
+        role: profile.role || 'contributeur',
+        status: profile.status || "Active",
+        expertRequested: profile.expertRequested || false,
+        expertApproved: profile.expertApproved || false,
+        registrationDate: profile.registrationDate || new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }),
+        userId: profile.userId || `#PRF-${Math.floor(10000 + Math.random() * 90000)}-TN`,
+        address: profile.address || "",
+        phone: profile.phone || "",
+        birthYear: profile.birthYear || profile.age || "",
+        age: profile.age || profile.birthYear || "",
+        profession: profile.profession || "",
+        onboardingComplete: profile.onboardingComplete || false,
+        businessProfile: profile.businessProfile || null,
+        isVerified: profile.isVerified || false,
+        verificationPending: profile.verificationPending || false,
+        avatarBase64: profile.avatarBase64 || profile.photoURL || null,
+        photoURL: profile.photoURL || profile.avatarBase64 || null,
+        idDocBase64: profile.idDocBase64 || null,
+        idDocName: profile.idDocName || null,
+        idDocType: profile.idDocType || null,
+        idDocDate: profile.idDocDate || null
+      };
+
+      onLoginSuccess(userPayload);
     });
   }
 
-  // Admin Access Quick Action
+  // ── REGISTER FORM ──────────────────────────────────────────────────────────
+  const regForm = containerEl.querySelector('#register-form');
+  if (regForm) {
+    const submitBtn = regForm.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.dataset.label = submitBtn.textContent;
+
+    regForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fullName = (containerEl.querySelector('#reg-fullname')?.value || '').trim();
+      const email = (containerEl.querySelector('#reg-email')?.value || '').trim();
+      const pass = containerEl.querySelector('#reg-pass')?.value || '';
+      const confirm = containerEl.querySelector('#reg-confirm-pass')?.value || '';
+      const roleSelect = containerEl.querySelector('#reg-role');
+      const role = roleSelect ? roleSelect.value : 'contributeur';
+
+      if (!fullName || !email || !pass || !confirm) {
+        showMsg(regForm, "Veuillez remplir tous les champs obligatoires.");
+        return;
+      }
+      if (pass !== confirm) {
+        showMsg(regForm, "Les mots de passe ne correspondent pas.");
+        return;
+      }
+      if (pass.length < 6) {
+        showMsg(regForm, "Le mot de passe doit contenir au moins 6 caractères.");
+        return;
+      }
+
+      if (submitBtn) setLoading(submitBtn, true);
+
+      const result = await firebaseRegister({ email, password: pass, fullName, role });
+
+      if (submitBtn) setLoading(submitBtn, false);
+
+      if (!result.ok) {
+        showMsg(regForm, result.error);
+        return;
+      }
+
+      // Registration success → show verification message, don't auto-login yet
+      showMsg(regForm,
+        `✅ Compte créé ! Un email de vérification a été envoyé à ${email}. Cliquez sur le lien dans l'email puis revenez vous connecter.`,
+        false
+      );
+
+      // Disable form after success
+      regForm.querySelectorAll('input, select, button').forEach(el => el.disabled = true);
+
+      // Switch to login tab after 3 seconds
+      setTimeout(() => onToggleAuthMode('login'), 4000);
+    });
+  }
+
+  // ── Admin Access Quick Action ──────────────────────────────────────────────
   const adminBtn = containerEl.querySelector('#admin-access-quick-btn');
   if (adminBtn) {
-    adminBtn.addEventListener('click', () => {
-      onAdminAccess();
-    });
+    adminBtn.addEventListener('click', () => onAdminAccess());
   }
 }

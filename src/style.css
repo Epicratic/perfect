@@ -254,6 +254,19 @@ body {
   object-fit: cover;
 }
 
+.header-menu-btn:hover {
+  background: rgba(255, 255, 255, 0.25) !important;
+  transform: scale(1.05);
+}
+
+.header-dropdown-item:hover {
+  background: #F1F5F9 !important;
+}
+
+.header-dropdown-item:active {
+  background: #E2E8F0 !important;
+}
+
 /* Dynamic Main Screen Viewport */
 .app-content-body {
   flex: 1;
@@ -314,9 +327,37 @@ body {
   transition: transform 0.2s ease;
 }
 
-.nav-item-btn.active {
-  color: var(--primary);
-  background: var(--primary-light);
+.nav-item-btn:focus {
+  outline: none;
+}
+
+.nav-item-btn:not(.active):focus,
+.nav-item-btn:not(.active):hover {
+  background: transparent !important;
+  color: #64748B !important;
+}
+
+.nav-item-btn:not(.active):focus svg,
+.nav-item-btn:not(.active):focus svg path,
+.nav-item-btn:not(.active):focus svg circle {
+  stroke: #64748B !important;
+  color: #64748B !important;
+}
+
+.nav-item-btn.active,
+.nav-item-btn[data-tab="profiles"].active {
+  color: var(--primary) !important;
+  background: var(--primary-light) !important;
+}
+
+.nav-item-btn.active svg,
+.nav-item-btn.active svg path,
+.nav-item-btn.active svg circle,
+.nav-item-btn[data-tab="profiles"].active svg,
+.nav-item-btn[data-tab="profiles"].active svg path,
+.nav-item-btn[data-tab="profiles"].active svg circle {
+  stroke: var(--primary) !important;
+  color: var(--primary) !important;
 }
 
 .nav-item-btn.active svg {
@@ -930,8 +971,10 @@ body {
 
 .map-container {
   width: 100%;
-  height: 250px;
-  background: #F1F5F9;
+  aspect-ratio: 395 / 830;
+  max-height: 920px;
+  min-height: 540px;
+  background: #F8FAFC;
   border-radius: var(--radius-md);
   position: relative;
   display: flex;
@@ -939,24 +982,32 @@ body {
   justify-content: center;
   overflow: hidden;
   border: 1px solid var(--border-color);
+  padding: 0;
+  margin: 0 auto;
 }
 
 .senegal-map-svg {
   width: 100%;
   height: 100%;
+  max-height: 920px;
+  display: block;
 }
 
 .map-region-path {
   fill: #CBD5E1;
   stroke: #FFFFFF;
   stroke-width: 1.5;
-  transition: fill 0.2s ease, transform 0.2s ease;
+  transition: opacity 0.2s ease, filter 0.2s ease, stroke 0.2s ease, stroke-width 0.2s ease;
   cursor: pointer;
+  -webkit-tap-highlight-color: rgba(0, 43, 73, 0.2);
+  touch-action: manipulation;
 }
 
-.map-region-path:hover {
-  fill: var(--primary);
-  filter: drop-shadow(0 4px 8px rgba(0, 168, 89, 0.4));
+.map-region-path:hover,
+.map-region-path:active {
+  filter: brightness(1.25) drop-shadow(0 4px 8px rgba(0, 43, 73, 0.4));
+  stroke: #002B49;
+  stroke-width: 3;
 }
 
 .map-region-very-good { fill: #007A3D; }
@@ -964,6 +1015,8 @@ body {
 .map-region-med { fill: #FFB800; }
 .map-region-low { fill: #FF9F43; }
 .map-region-critical { fill: #EA5455; }
+.map-region-unrated { fill: #CBD5E1; }
+
 
 .map-tooltip {
   position: absolute;
@@ -1014,4 +1067,43 @@ body {
 
 .switch-control.active .switch-knob {
   transform: translateX(24px);
+.workshop-req-card:hover {
+  box-shadow: 0 4px 15px rgba(0, 43, 73, 0.08);
+  border-color: #CBD5E1 !important;
+}
+
+/* ==========================================================================
+   Native Mobile & Android WebView Overrides
+   ========================================================================== */
+@media (max-width: 600px) {
+  body {
+    padding: 0 !important;
+    background: var(--bg-app) !important;
+  }
+
+  #app {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  .preview-control-bar, html.is-mobile-native .preview-control-bar {
+    display: none !important;
+  }
+
+  .mobile-frame {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: 100vh !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  .mobile-notch {
+    display: none !important;
+  }
+
+  .mobile-header-bar {
+    padding-top: 4px;
+    height: 38px;
+  }
 }

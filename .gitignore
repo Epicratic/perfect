@@ -1,0 +1,21 @@
+﻿# Android build artifacts
+android/app/build/
+android/.gradle/
+android/build/
+android/local.properties
+android/app/src/main/assets/
+
+# APK files (can be large)
+*.apk
+
+# Node/vendor
+node_modules/
+src/vendor/
+
+# Environment/secrets
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db

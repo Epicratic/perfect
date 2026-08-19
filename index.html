@@ -5,14 +5,59 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>PerfECT - Performance Evaluation & Communication Tech</title>
   
-  <!-- Google Fonts -->
+  <!-- Detect mobile/Android BEFORE any CSS loads to prevent flash -->
+  <script>
+    (function() {
+      var ua = window.navigator.userAgent || '';
+      var isAndroid = ua.indexOf('Android') > -1;
+      var isMobile = /Mobi|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+      if (isAndroid || isMobile) {
+        document.documentElement.classList.add('is-mobile-native');
+      }
+      window.addEventListener('error', function(e) {
+        console.error('Global Error Captured:', e.message, e.filename, e.lineno);
+        var mount = document.getElementById('app-body-mount');
+        if (mount && !mount.children.length) {
+          mount.innerHTML = '<div style="padding:24px;text-align:center;color:#002B49;font-family:sans-serif;"><h3>⚠️ Erreur de chargement</h3><p style="font-size:11px;color:#EA5455;">' + (e.message || 'Erreur inconnue') + '</p><button onclick="location.reload()" style="padding:8px 16px;background:#00A859;color:white;border:none;border-radius:8px;font-weight:bold;margin-top:12px;">Relancer</button></div>';
+        }
+      });
+    })();
+  </script>
+
+
+  <!-- Inline style: hides dev bar immediately on mobile/Android before CSS loads -->
+  <style>
+    html.is-mobile-native .preview-control-bar,
+    html.is-mobile-native .mobile-notch,
+    html.is-mobile-native .mobile-header-bar {
+      display: none !important;
+    }
+    html.is-mobile-native body {
+      padding: 0 !important;
+      background: #F4F7F6 !important;
+    }
+    html.is-mobile-native #app {
+      width: 100% !important;
+      max-width: 100% !important;
+    }
+    html.is-mobile-native .mobile-frame {
+      width: 100vw !important;
+      max-width: 100vw !important;
+      height: 100vh !important;
+      border-radius: 0 !important;
+      box-shadow: none !important;
+    }
+  </style>
+
+  <!-- Google Fonts with display=swap for offline resilience -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
-  
-  <!-- CDN Scripts for Visual Enhancements -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet"></noscript>
+
+  <!-- Vendor Scripts (local copies for offline/WebView support) -->
+  <script src="./src/vendor/chart.umd.min.js"></script>
+  <script src="./src/vendor/confetti.browser.min.js"></script>
 
   <!-- App Stylesheet -->
   <link rel="stylesheet" href="./src/style.css">
@@ -20,7 +65,7 @@
 <body>
 
   <div id="app">
-    <!-- Desktop Preview Quick Control Bar -->
+    <!-- Desktop Preview Quick Control Bar (hidden on mobile/Android) -->
     <div class="preview-control-bar">
       <div class="preview-title">
         <span>PerfECT App</span>
@@ -31,9 +76,9 @@
           <option value="login">🔐 1. Connexion / Auth</option>
           <option value="dashboard" selected>📊 2. Tableau Général</option>
           <option value="reporting">📋 3. Fiche de Reporting</option>
-          <option value="analytics">🗺️ 4. Tableau Détaillé & Carte</option>
+          <option value="analytics">🗺️ 4. Tableau Détaillé &amp; Carte</option>
           <option value="profiles">👤 5. Profil Utilisateur</option>
-          <option value="pricing">💎 6. Plans & Tarifs</option>
+          <option value="pricing">💎 6. Plans &amp; Tarifs</option>
           <option value="admin">⚙️ 7. Portail Admin</option>
         </select>
       </div>
@@ -41,7 +86,7 @@
 
     <!-- Mobile Device Frame -->
     <div class="mobile-frame" id="mobile-app-shell">
-      <!-- Top Status Bar & Notch -->
+      <!-- Top Status Bar & Notch (desktop simulation only) -->
       <div class="mobile-notch"></div>
       <div class="mobile-header-bar">
         <span id="clock-time">09:41</span>
@@ -62,6 +107,6 @@
     </div>
   </div>
 
-  <script type="module" src="./src/main.js"></script>
+  <script type="module" src="./src/main.js?v=2.43.0"></script>
 </body>
 </html>
