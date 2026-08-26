@@ -47,16 +47,16 @@ export const translations = {
     // Dashboard (Tableau Général)
     generalDashboard: "Tableau Général",
     generalDashboardSub: "Suivez les performances du développement à l’échelle nationale, 24h/24 et en temps réel.",
-    indiceNationalTitle: "Indice National",
+    indiceNationalTitle: "Indice de développement – score de performance nationale",
     basedOnRatings: "Basé sur {count} évaluations enregistrées",
     overallScoreTitle: "Performance Globale",
     overallScoreOut: "sur 5.0",
     scoreStatusGood: "Performance Très Satisfaisante",
     scoreStatusAverage: "Performance Moyenne",
     
-    indiceSocietalTitle: "Indice Sociétal",
-    indiceSectorielTitle: "Indice Sectoriel",
-    indiceTerritorialTitle: "Indice Territorial",
+    indiceSocietalTitle: "Indice de développement – score par performance sociétale",
+    indiceSectorielTitle: "Indice de développement – score de performance par secteur",
+    indiceTerritorialTitle: "Indice de développement – score de performance par territoire",
     
     pillarEconomic: "Économique",
     pillarSocial: "Social",
@@ -190,40 +190,46 @@ export const translations = {
     
     // Indicators
     indicators: {
-      Facility: "Équipements & Infrastructures",
-      Staff: "Personnel & Ressources Humaines",
-      Programs: "Programmes & Services",
+      Facility: "Infrastructures",
+      Staff: "Personnel",
+      Programs: "Programmes",
       InvestmentAmount: "Montant des Investissements",
       JobsCreated: "Emplois Créés",
-      ValueAdded: "Valeur Ajoutée Générée",
-      PollutionEmission: "Émissions & Pollutions",
-      ResourceConsumption: "Consommation de Ressources",
-      Resilience: "Résilience aux Catastrophes"
+      ValueAdded: "Valeur Ajoutée",
+      PollutionEmission: "Émission de pollution",
+      ResourceConsumption: "Consommation de ressources",
+      Resilience: "Résilience aux catastrophes"
     },
 
     // Sub-Indicators Multilingual Dictionary
     subIndicators: {
-      Accessibility: "Accessibilité & Ergonomie",
-      Cleanliness: "Propreté & Hygiène",
-      Comfort: "Confort & Équipements",
-      Availability: "Disponibilité & Présence",
-      Friendliness: "Accueil & Courtoisie",
-      Expertise: "Compétence & Expertise",
-      Effectiveness: "Efficacité & Résultats",
-      Inclusivity: "Inclusivité & Équité",
-      Innovation: "Innovation & Modernité",
+      // Social - Facility
+      Accessibility: "Accessibilité",
+      Cleanliness: "Propreté",
+      Comfort: "Confort",
+      // Social - Staff
+      Availability: "Disponibilité",
+      Friendliness: "Accueil",
+      Expertise: "Compétence",
+      // Social - Programs
+      Effectiveness: "Efficacité",
+      Inclusivity: "Inclusivité",
+      Innovation: "Innovation",
+      // Economic
       Domestic: "Investissement National",
-      Foreign: "Investissement Étranger Direct",
-      Specialist: "Emplois Cadres & Spécialistes",
-      Technician: "Emplois Techniques & Ouvriers",
+      Foreign: "Investissement Étranger",
+      Specialist: "Emplois Spécialistes",
+      Technician: "Emplois Techniciens",
       Gross: "Valeur Ajoutée Brute",
       Net: "Valeur Ajoutée Nette",
-      Waste: "Déchets & Recyclage",
-      GHG: "Émissions Gaz à Effet de Serre",
-      Water: "Consommation d'Eau",
-      Energy: "Consommation d'Énergie",
-      Floods: "Résilience aux Inondations",
-      Earthquakes: "Résilience aux Risques Naturels"
+      // Environmental
+      Waste: "Déchets",
+      GHG: "Gaz à effet de serre (GES)",
+      Water: "Eau",
+      Energy: "Énergie",
+      Floods: "Inondations",
+      Fires: "Incendies",
+      Earthquakes: "Séismes"
     }
   },
   
@@ -273,16 +279,16 @@ export const translations = {
     // Dashboard (Tableau Général)
     generalDashboard: "General Dashboard",
     generalDashboardSub: "Track development performance nationwide, 24/7 in real time.",
-    indiceNationalTitle: "National Index",
+    indiceNationalTitle: "Development Index – National Performance Score",
     basedOnRatings: "Based on {count} recorded evaluations",
     overallScoreTitle: "Overall Performance Score",
     overallScoreOut: "out of 5.0",
     scoreStatusGood: "Highly Satisfactory Performance",
     scoreStatusAverage: "Average Performance",
     
-    indiceSocietalTitle: "Societal Index",
-    indiceSectorielTitle: "Sectorial Index",
-    indiceTerritorialTitle: "Territorial Index",
+    indiceSocietalTitle: "Development Index – Score by Societal Performance",
+    indiceSectorielTitle: "Development Index – Performance Score by Sector",
+    indiceTerritorialTitle: "Development Index – Performance Score by Territory",
     
     pillarEconomic: "Economic",
     pillarSocial: "Social",
@@ -416,40 +422,46 @@ export const translations = {
     
     // Indicators
     indicators: {
-      Facility: "Facilities & Infrastructure",
-      Staff: "Staff & Human Resources",
-      Programs: "Programs & Services",
+      Facility: "Infrastructure",
+      Staff: "Staff",
+      Programs: "Programs",
       InvestmentAmount: "Investment Amount",
       JobsCreated: "Jobs Created",
-      ValueAdded: "Value Added Generated",
-      PollutionEmission: "Emissions & Pollution",
+      ValueAdded: "Value Added",
+      PollutionEmission: "Pollution Emission",
       ResourceConsumption: "Resource Consumption",
       Resilience: "Disaster Resilience"
     },
 
     // Sub-Indicators Multilingual Dictionary
     subIndicators: {
-      Accessibility: "Accessibility & Usability",
-      Cleanliness: "Cleanliness & Hygiene",
-      Comfort: "Comfort & Amenities",
-      Availability: "Availability & Presence",
-      Friendliness: "Friendliness & Courtesy",
-      Expertise: "Skill & Expertise",
-      Effectiveness: "Effectiveness & Results",
-      Inclusivity: "Inclusivity & Fairness",
-      Innovation: "Innovation & Modernity",
+      // Social - Facility
+      Accessibility: "Accessibility",
+      Cleanliness: "Cleanliness",
+      Comfort: "Comfort",
+      // Social - Staff
+      Availability: "Availability",
+      Friendliness: "Friendliness",
+      Expertise: "Expertise",
+      // Social - Programs
+      Effectiveness: "Effectiveness",
+      Inclusivity: "Inclusivity",
+      Innovation: "Innovation",
+      // Economic
       Domestic: "Domestic Investment",
-      Foreign: "Foreign Direct Investment",
-      Specialist: "Executive & Specialist Jobs",
-      Technician: "Technical & Worker Jobs",
+      Foreign: "Foreign Investment",
+      Specialist: "Specialist Jobs",
+      Technician: "Technician Jobs",
       Gross: "Gross Value Added",
       Net: "Net Value Added",
-      Waste: "Waste & Recycling",
-      GHG: "Greenhouse Gas Emissions",
-      Water: "Water Consumption",
-      Energy: "Energy Consumption",
-      Floods: "Flood Resilience",
-      Earthquakes: "Disaster Resilience"
+      // Environmental
+      Waste: "Waste",
+      GHG: "Greenhouse Gases (GHG)",
+      Water: "Water",
+      Energy: "Energy",
+      Floods: "Floods",
+      Fires: "Fires",
+      Earthquakes: "Earthquakes"
     }
   },
   
@@ -499,16 +511,16 @@ export const translations = {
     // Dashboard (Tableau Général)
     generalDashboard: "لوحة التحكم العامة",
     generalDashboardSub: "متابعة أداء التنمية على المستوى الوطني، 24/24 وفي الوقت الفعلي.",
-    indiceNationalTitle: "المؤشر الوطني",
+    indiceNationalTitle: "مؤشر التنمية – درجة الأداء الوطني",
     basedOnRatings: "بناءً على {count} تقييماً مسجلاً",
     overallScoreTitle: "الأداء العام",
     overallScoreOut: "من 5.0",
     scoreStatusGood: "أداء ممتاز ومميز",
     scoreStatusAverage: "أداء متوسط",
     
-    indiceSocietalTitle: "المؤشر المجتمعي",
-    indiceSectorielTitle: "المؤشر القطاعي",
-    indiceTerritorialTitle: "المؤشر الإقليمي",
+    indiceSocietalTitle: "مؤشر التنمية – الدرجة حسب الأداء المجتمعي",
+    indiceSectorielTitle: "مؤشر التنمية – درجة الأداء حسب القطاع",
+    indiceTerritorialTitle: "مؤشر التنمية – درجة الأداء حسب الإقليم",
     
     pillarEconomic: "اقتصادي",
     pillarSocial: "اجتماعي",
@@ -642,40 +654,46 @@ export const translations = {
     
     // Indicators
     indicators: {
-      Facility: "المرافق والبنية التحتية",
-      Staff: "الموظفون والموارد البشرية",
-      Programs: "البرامج والخدمات",
+      Facility: "البنية التحتية",
+      Staff: "الموظفون",
+      Programs: "البرامج",
       InvestmentAmount: "حجم الاستثمارات",
       JobsCreated: "الوظائف المستحدثة",
-      ValueAdded: "القيمة المضافة المحققة",
-      PollutionEmission: "الانبعاثات والتلوث",
+      ValueAdded: "القيمة المضافة",
+      PollutionEmission: "انبعاثات التلوث",
       ResourceConsumption: "استهلاك الموارد",
       Resilience: "المرونة ضد الكوارث"
     },
 
     // Sub-Indicators Multilingual Dictionary
     subIndicators: {
-      Accessibility: "إمكانية الوصول والسهولة",
-      Cleanliness: "النظافة والنظافة العامة",
-      Comfort: "الراحة والتجهيزات",
-      Availability: "التوافر والحضور",
-      Friendliness: "حسن الاستقبال واللباقة",
-      Expertise: "الخبرة والكفاءة",
-      Effectiveness: "الفعالية والنتائج",
-      Inclusivity: "الشمولية والعدالة",
-      Innovation: "الابتكار والحداثة",
+      // Social - Facility
+      Accessibility: "إمكانية الوصول",
+      Cleanliness: "النظافة",
+      Comfort: "الراحة",
+      // Social - Staff
+      Availability: "التوافر",
+      Friendliness: "حسن الاستقبال",
+      Expertise: "الكفاءة",
+      // Social - Programs
+      Effectiveness: "الفعالية",
+      Inclusivity: "الشمولية",
+      Innovation: "الابتكار",
+      // Economic
       Domestic: "الاستثمار الوطني",
-      Foreign: "الاستثمار الأجنبي المباشر",
-      Specialist: "وظائف الإطارات والخبراء",
-      Technician: "الوظائف الفنية والعمالية",
-      Gross: "القيمة المضافة الإجمالية",
-      Net: "القيمة المضافة الصافية",
-      Waste: "النفايات وإعادة التدوير",
-      GHG: "انبعاثات الغازات الدفيئة",
-      Water: "استهلاك المياه",
-      Energy: "استهلاك الطاقة",
-      Floods: "المرونة ضد الفيضانات",
-      Earthquakes: "المرونة ضد المخاطر الطبيعية"
+      Foreign: "الاستثمار الأجنبي",
+      Specialist: "مختص",
+      Technician: "تقني",
+      Gross: "إجمالية",
+      Net: "صافية",
+      // Environmental
+      Waste: "النفايات",
+      GHG: "الغازات الدفيئة",
+      Water: "المياه",
+      Energy: "الطاقة",
+      Floods: "الفيضانات",
+      Fires: "الحرائق",
+      Earthquakes: "الزلازل"
     }
   }
 };

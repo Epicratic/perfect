@@ -308,16 +308,8 @@ export function renderDashboardView(appState, translations) {
     }).sort((a, b) => b.score - a.score).slice(0, 10);
   }
 
-  if (top10Actors.length === 0) {
-    const rawTop = (data.topActors && data.topActors.length > 0) ? data.topActors : initialAppData.topActors;
-    top10Actors = rawTop.map(a => {
-      const customAvatar = findActorAvatar(a.name);
-      return {
-        ...a,
-        avatarUrl: customAvatar || a.avatarUrl || `https://images.unsplash.com/photo-1534528741775?w=150&auto=format&fit=crop&q=80`
-      };
-    });
-  }
+  // No fallback to mock data — if no Firestore evals exist, top10Actors stays empty
+  // and the card will show an appropriate empty-state message.
 
   const top10CarouselHTML = top10Actors.map(actor => `
     <div class="actor-carousel-card action-actor-item" 
@@ -337,14 +329,14 @@ export function renderDashboardView(appState, translations) {
 
   const indicatorNamesMap = {
     'Staff': 'Personnel',
-    'Facility': 'Équipements',
+    'Facility': 'Infrastructures',
     'Programs': 'Programmes',
     'InvestmentAmount': 'Investissements',
     'JobsCreated': 'Emplois créés',
     'ValueAdded': 'Valeur ajoutée',
-    'PollutionEmission': 'Pollution & Émissions',
+    'PollutionEmission': 'Émission de pollution',
     'ResourceConsumption': 'Consommation de ressources',
-    'Resilience': 'Résilience'
+    'Resilience': 'Résilience aux catastrophes'
   };
 
   // 6. CARD 6: Dernières Évaluations
@@ -464,7 +456,10 @@ export function renderDashboardView(appState, translations) {
 
       <!-- CARD 2: Indice Sociétal (Vertical Bar Chart Histogram for 3 Pillars) -->
       <div class="card" style="padding-bottom: 50px;">
-        <div class="card-title" style="margin-bottom: 12px; text-align: left;">${t.indiceSocietalTitle}</div>
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+          <div class="card-title" style="margin-bottom: 0; text-align: left; font-size: 13.5px; font-weight: 700; color: #002B49; flex: 1; padding-right: 8px; line-height: 1.3;">${t.indiceSocietalTitle}</div>
+          <button class="btn-card-info" data-info-type="societal" title="Informations sur cet indicateur" style="background: rgba(0,43,73,0.06); border: 1px solid #CBD5E1; color: #002B49; width: 24px; height: 24px; border-radius: 50%; font-size: 12px; font-weight: 800; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.2s;">?</button>
+        </div>
         <div class="v-bar-chart-container" style="height: 130px; margin-bottom: 35px;">
           ${pillarBarsHTML}
         </div>
@@ -472,7 +467,10 @@ export function renderDashboardView(appState, translations) {
 
       <!-- CARD 3: Indice Sectoriel (Vertical Bar Chart Histogram for 7 Macro-Sectors with Oblique 2-Line Labels) -->
       <div class="card" style="padding-bottom: 60px;">
-        <div class="card-title" style="margin-bottom: 12px; text-align: left;">${t.indiceSectorielTitle}</div>
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+          <div class="card-title" style="margin-bottom: 0; text-align: left; font-size: 13.5px; font-weight: 700; color: #002B49; flex: 1; padding-right: 8px; line-height: 1.3;">${t.indiceSectorielTitle}</div>
+          <button class="btn-card-info" data-info-type="sectorial" title="Informations sur cet indicateur" style="background: rgba(0,43,73,0.06); border: 1px solid #CBD5E1; color: #002B49; width: 24px; height: 24px; border-radius: 50%; font-size: 12px; font-weight: 800; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.2s;">?</button>
+        </div>
         <div class="v-bar-chart-container" style="height: 130px; margin-bottom: 55px;">
           ${sectorBarsHTML}
         </div>
@@ -481,8 +479,11 @@ export function renderDashboardView(appState, translations) {
       <!-- CARD 4: Indice Territorial (Horizontal Bar Chart Histogram for Selected Country Regions) -->
       <div class="card">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-          <div class="card-title" style="text-align: left;">${t.indiceTerritorialTitle}</div>
-          <div class="badge badge-info">${selectedCountryObj.flag} ${selectedCountryObj.names[lang] || selectedCountryObj.names.fr}</div>
+          <div class="card-title" style="text-align: left; margin-bottom: 0; font-size: 13.5px; font-weight: 700; color: #002B49; flex: 1; padding-right: 8px; line-height: 1.3;">${t.indiceTerritorialTitle}</div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <div class="badge badge-info">${selectedCountryObj.flag} ${selectedCountryObj.names[lang] || selectedCountryObj.names.fr}</div>
+            <button class="btn-card-info" data-info-type="territorial" title="Informations sur cet indicateur" style="background: rgba(0,43,73,0.06); border: 1px solid #CBD5E1; color: #002B49; width: 24px; height: 24px; border-radius: 50%; font-size: 12px; font-weight: 800; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.2s;">?</button>
+          </div>
         </div>
         <!-- Sort toggle buttons -->
         <div style="display: flex; gap: 6px; margin-bottom: 12px;">
@@ -511,7 +512,13 @@ export function renderDashboardView(appState, translations) {
         </div>
 
         <div class="actors-carousel-container">
-          ${top10CarouselHTML}
+          ${top10Actors.length > 0 ? top10CarouselHTML : `
+            <div style="width:100%;text-align:center;padding:24px 16px;color:#94A3B8;">
+              <div style="font-size:28px;margin-bottom:8px;">🏆</div>
+              <div style="font-size:12px;font-weight:600;">Aucune évaluation disponible</div>
+              <div style="font-size:11px;margin-top:4px;">Publiez des évaluations pour voir apparaître le classement des acteurs.</div>
+            </div>
+          `}
         </div>
       </div>
 
@@ -588,6 +595,16 @@ export function attachDashboardEvents(containerEl, onCountryChange, onSectorSele
     });
   });
 
+  // Card Info Buttons ('?') Click Listener -> Displays contextual explanation modal
+  const infoButtons = containerEl.querySelectorAll('.btn-card-info');
+  infoButtons.forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const infoType = btn.getAttribute('data-info-type');
+      showCardInfoModal(infoType, _appState ? _appState.lang : 'fr');
+    });
+  });
+
   // Attach Lightbox viewer for evaluation attachment images
   attachLightboxToImages(containerEl);
 }
@@ -638,22 +655,36 @@ function showActorRadarModal(actorName, actorSector, actorScore, actorAvatarUrl,
       <!-- Radar Charts — all 3 stack vertically, no height constraint -->
       <div style="padding:16px; display:flex; flex-direction:column; gap:14px; padding-bottom:24px;">
         <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:14px; padding:14px; text-align:center;">
-          <div style="font-size:11px; font-weight:800; color:#2563EB; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:10px;">💼 Économique</div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid #EEF2F6;">
+            <div style="font-size:11px; font-weight:800; color:#2563EB; text-transform:uppercase; letter-spacing:0.5px;">💼 Économique</div>
+            <div id="actor-radar-econ-avg-badge" style="font-size:11px; font-weight:800; color:#2563EB; background:#FFFFFF; border:1px solid #DBEAFE; padding:2px 8px; border-radius:12px; display:none;"></div>
+          </div>
           <div style="position:relative; width:100%; height:200px;">
             <canvas id="actor-radar-econ"></canvas>
           </div>
+          <div id="actor-radar-econ-indicators-row" style="display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; margin-top:10px; padding-top:10px; border-top:1px solid #EEF2F6;"></div>
         </div>
+
         <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:14px; padding:14px; text-align:center;">
-          <div style="font-size:11px; font-weight:800; color:#EA5455; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:10px;">🤝 Social</div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid #EEF2F6;">
+            <div style="font-size:11px; font-weight:800; color:#EA5455; text-transform:uppercase; letter-spacing:0.5px;">🤝 Social</div>
+            <div id="actor-radar-social-avg-badge" style="font-size:11px; font-weight:800; color:#EA5455; background:#FFFFFF; border:1px solid #FECACA; padding:2px 8px; border-radius:12px; display:none;"></div>
+          </div>
           <div style="position:relative; width:100%; height:200px;">
             <canvas id="actor-radar-social"></canvas>
           </div>
+          <div id="actor-radar-social-indicators-row" style="display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; margin-top:10px; padding-top:10px; border-top:1px solid #EEF2F6;"></div>
         </div>
+
         <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:14px; padding:14px; text-align:center;">
-          <div style="font-size:11px; font-weight:800; color:#00A859; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:10px;">🌿 Environnemental</div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid #EEF2F6;">
+            <div style="font-size:11px; font-weight:800; color:#00A859; text-transform:uppercase; letter-spacing:0.5px;">🌿 Environnemental</div>
+            <div id="actor-radar-env-avg-badge" style="font-size:11px; font-weight:800; color:#00A859; background:#FFFFFF; border:1px solid #BBF7D0; padding:2px 8px; border-radius:12px; display:none;"></div>
+          </div>
           <div style="position:relative; width:100%; height:200px;">
             <canvas id="actor-radar-env"></canvas>
           </div>
+          <div id="actor-radar-env-indicators-row" style="display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; margin-top:10px; padding-top:10px; border-top:1px solid #EEF2F6;"></div>
         </div>
       </div>
     </div>
@@ -674,8 +705,8 @@ function showActorRadarModal(actorName, actorSector, actorScore, actorAvatarUrl,
     const scores = getRadarScoresFromEvals(actorName, appState);
     try {
       initRadarChart('actor-radar-econ',   'Économique',      ['Investissement', 'Emplois', 'Valeur Ajoutée'], scores.econ,   '#2563EB');
-      initRadarChart('actor-radar-social', 'Social',          ['Équipements', 'Personnel', 'Programmes'],      scores.social, '#EA5455');
-      initRadarChart('actor-radar-env',    'Environnemental', ['Pollution', 'Ressources', 'Résilience'],       scores.env,    '#00A859');
+      initRadarChart('actor-radar-social', 'Social',          ['Infrastructures', 'Personnel', 'Programmes'],   scores.social, '#EA5455');
+      initRadarChart('actor-radar-env',    'Environnemental', ['Émission de pollution', 'Ressources', 'Résilience'], scores.env, '#00A859');
     } catch (err) {
       console.warn('Actor radar modal init error:', err);
     }
@@ -683,4 +714,156 @@ function showActorRadarModal(actorName, actorSector, actorScore, actorAvatarUrl,
   setTimeout(drawRadars, 60);
   setTimeout(drawRadars, 300);
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Dashboard Card Info Modal — opened when clicking '?' on cards 1-4
+// ─────────────────────────────────────────────────────────────────────
+function showCardInfoModal(infoType, lang = 'fr') {
+  const old = document.getElementById('card-info-modal-overlay');
+  if (old) old.remove();
+
+  const prevBodyOverflow = document.body.style.overflow;
+  document.body.style.overflow = 'hidden';
+
+  const overlay = document.createElement('div');
+  overlay.id = 'card-info-modal-overlay';
+  overlay.style.cssText = `
+    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+    background: rgba(15,23,42,0.80); backdrop-filter: blur(6px);
+    z-index: 999995;
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px 16px; box-sizing: border-box;
+    animation: fadeIn 0.2s ease;
+  `;
+
+  const infoContents = {
+    national: {
+      badge: "🌍 Performance Globale",
+      title: "Indice de développement – score de performance nationale",
+      desc: "Mesure globale et synthétique du niveau de développement et de performance des services publics et privés à l'échelle de la nation sélectionnée.",
+      calcTitle: "Méthode de Calcul :",
+      calcText: "Moyenne consolidée des scores de performance issus de l'ensemble des 7 macro-secteurs d'activité évalués par les citoyens, entreprises et experts.",
+      scaleTitle: "Échelle de Lecture (0 à 5) :",
+      scaleItems: [
+        { color: "#EA5455", range: "0.0 – 1.9", label: "Performance critique / Défaillante" },
+        { color: "#FFB800", range: "2.0 – 2.9", label: "Performance moyenne / Passable" },
+        { color: "#28C76F", range: "3.0 – 3.9", label: "Bonne performance / Satisfaisante" },
+        { color: "#00A859", range: "4.0 – 5.0", label: "Performance excellente / Exemplaire" }
+      ]
+    },
+    societal: {
+      badge: "🎯 3 Piliers du Développement",
+      title: "Indice de développement – score par performance sociétale",
+      desc: "Décompose la performance nationale selon les trois piliers fondamentaux du développement durable :",
+      pillarsList: [
+        { icon: "💼", name: "Économique", detail: "Dynamisme des investissements, emplois créés et valeur ajoutée." },
+        { icon: "🤝", name: "Social", detail: "Qualité des infrastructures, compétence et accueil du personnel, impact des programmes." },
+        { icon: "🌿", name: "Environnemental", detail: "Émission de pollution, maîtrise des ressources (eau, énergie), résilience aux catastrophes (inondations, incendies, séismes)." }
+      ],
+      calcTitle: "Méthode de Calcul :",
+      calcText: "Moyenne des évaluations enregistrées pour chaque pilier sur l'échelle standardisée de 1 à 5 étoiles."
+    },
+    sectorial: {
+      badge: "🏛️ 7 Macro-Secteurs Clés",
+      title: "Indice de développement – score de performance par secteur",
+      desc: "Évalue et compare la performance sur les 7 secteurs stratégiques de la nation :",
+      sectorsList: [
+        "⚖️ <strong>Gouvernance</strong> : Parlement, Gouvernement, Justice",
+        "🛡️ <strong>Sécurité & Défense</strong> : Police, Gendarmerie, Pompiers, Armées",
+        "🏥 <strong>Santé & Hygiène</strong> : Médecine, Pharmacie, Déchets, Assainissement",
+        "🎓 <strong>Instruction & Culture</strong> : Éducation, Université, Formation, Arts, Sports, Cultes",
+        "💳 <strong>Alimentation & Finance</strong> : Agriculture, Industrie, Commerce, Banque, Bourse, Assurance",
+        "🏠 <strong>Logement & Tourisme</strong> : Aménagement, Équipement, Immobilier, Hôtellerie",
+        "🚌 <strong>Transport & Télécoms</strong> : Routes, Rail, Maritime, Aérien, Poste, Téléphonie, Internet"
+      ],
+      calcTitle: "Méthode de Calcul :",
+      calcText: "Moyenne des notes attribuées aux structures et acteurs rattachés à chaque secteur d'activité."
+    },
+    territorial: {
+      badge: "🗺️ Baromètre Territorial",
+      title: "Indice de développement – score de performance par territoire",
+      desc: "Mesure le niveau de développement sociétal de chaque secteur par région / gouvernorat du pays sélectionné.",
+      featuresList: [
+        "📊 <strong>↓ Ordre de performance</strong> : Classement descendant mettant en valeur les territoires moteurs et ceux nécessitant des actions prioritaires.",
+        "🔤 <strong>A–Z Alphabétique</strong> : Consultation et recherche alphabétique rapide d'un territoire précis."
+      ],
+      calcTitle: "Méthode de Calcul :",
+      calcText: "Moyenne agrégée de l'ensemble des évaluations géolocalisées dans chaque région et ses localités."
+    }
+  };
+
+  const item = infoContents[infoType] || infoContents.national;
+
+  overlay.innerHTML = `
+    <div style="width:100%; max-width:440px; background:#FFFFFF; border-radius:20px; overflow:hidden; box-shadow:0 24px 48px rgba(0,0,0,0.35); max-height:90vh; display:flex; flex-direction:column;">
+      <!-- Header -->
+      <div style="background: linear-gradient(135deg,#002B49,#004A7C); padding: 18px 18px 16px; position:relative; color:#FFFFFF;">
+        <button id="btn-close-info-modal" style="position:absolute; top:12px; right:12px; background:rgba(255,255,255,0.15); border:none; color:#fff; width:30px; height:30px; border-radius:50%; font-size:15px; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background 0.2s;">✕</button>
+        <span style="font-size:10px; font-weight:800; background:rgba(255,255,255,0.18); padding:3px 10px; border-radius:12px; display:inline-block; margin-bottom:6px; letter-spacing:0.4px;">${item.badge}</span>
+        <h3 style="font-size:13.5px; font-weight:800; margin:0; line-height:1.35; color:#FFFFFF;">${item.title}</h3>
+      </div>
+
+      <!-- Body -->
+      <div style="padding:16px 18px; overflow-y:auto; font-size:12px; color:#334155; line-height:1.5; display:flex; flex-direction:column; gap:12px;">
+        <div>
+          <strong style="color:#002B49; font-size:11.5px; text-transform:uppercase; letter-spacing:0.5px;">📖 Définition & Portée :</strong>
+          <p style="margin:4px 0 0 0; color:#475569;">${item.desc}</p>
+        </div>
+
+        ${item.pillarsList ? `
+          <div style="display:flex; flex-direction:column; gap:6px; background:#F8FAFC; border:1px solid #E2E8F0; border-radius:12px; padding:10px 12px;">
+            ${item.pillarsList.map(p => `
+              <div style="font-size:11.5px;">
+                <span style="font-weight:800; color:#002B49;">${p.icon} ${p.name} :</span>
+                <span style="color:#64748B;"> ${p.detail}</span>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+
+        ${item.sectorsList ? `
+          <div style="display:flex; flex-direction:column; gap:5px; background:#F8FAFC; border:1px solid #E2E8F0; border-radius:12px; padding:10px 12px; font-size:11px;">
+            ${item.sectorsList.map(s => `<div>${s}</div>`).join('')}
+          </div>
+        ` : ''}
+
+        ${item.featuresList ? `
+          <div style="display:flex; flex-direction:column; gap:6px; background:#F8FAFC; border:1px solid #E2E8F0; border-radius:12px; padding:10px 12px; font-size:11.5px;">
+            ${item.featuresList.map(f => `<div>${f}</div>`).join('')}
+          </div>
+        ` : ''}
+
+        ${item.scaleItems ? `
+          <div>
+            <strong style="color:#002B49; font-size:11px; text-transform:uppercase; letter-spacing:0.5px;">🎯 Échelle de Lecture :</strong>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:6px;">
+              ${item.scaleItems.map(si => `
+                <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-left:4px solid ${si.color}; border-radius:8px; padding:6px 8px; font-size:10.5px;">
+                  <div style="font-weight:800; color:${si.color};">${si.range}</div>
+                  <div style="color:#64748B; font-size:9.5px; font-weight:600;">${si.label}</div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
+
+        <div style="background:#F0FDF4; border:1px solid #DCFCE7; border-radius:12px; padding:10px 12px;">
+          <div style="font-size:11px; font-weight:800; color:#166534; margin-bottom:2px;">🧮 ${item.calcTitle}</div>
+          <div style="font-size:11px; color:#15803D; line-height:1.4;">${item.calcText}</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  const close = () => {
+    overlay.remove();
+    document.body.style.overflow = prevBodyOverflow;
+  };
+
+  overlay.querySelector('#btn-close-info-modal').addEventListener('click', close);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+}
+
 

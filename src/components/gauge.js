@@ -7,7 +7,10 @@ export function renderGaugeMeter(score, maxScore = 5.0, statusText = "", title =
 
   return `
     <div class="gauge-meter-card">
-      <div class="card-title" style="text-align: left; margin-bottom: 14px; font-size: 15px; font-weight: 700; color: #002B49;">${title}</div>
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px;">
+        <div class="card-title" style="text-align: left; margin-bottom: 0; font-size: 13.5px; font-weight: 700; color: #002B49; flex: 1; padding-right: 8px; line-height: 1.3;">${title}</div>
+        <button class="btn-card-info" data-info-type="national" title="Informations sur cet indicateur" style="background: rgba(0,43,73,0.06); border: 1px solid #CBD5E1; color: #002B49; width: 24px; height: 24px; border-radius: 50%; font-size: 12px; font-weight: 800; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.2s;">?</button>
+      </div>
 
       <div class="gauge-svg-wrapper" style="width: 240px; height: 125px;">
         <svg viewBox="-15 -10 230 125" width="100%" height="100%">

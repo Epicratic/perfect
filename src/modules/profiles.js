@@ -401,14 +401,14 @@ export function renderProfilesView(appState, translations) {
 
   const indicatorNamesMap = {
     'Staff': 'Personnel',
-    'Facility': 'Équipements',
+    'Facility': 'Infrastructures',
     'Programs': 'Programmes',
     'InvestmentAmount': 'Investissements',
     'JobsCreated': 'Emplois créés',
     'ValueAdded': 'Valeur ajoutée',
-    'PollutionEmission': 'Pollution & Émissions',
+    'PollutionEmission': 'Émission de pollution',
     'ResourceConsumption': 'Consommation de ressources',
-    'Resilience': 'Résilience'
+    'Resilience': 'Résilience aux catastrophes'
   };
 
   // Render History Items — same format as analytics/dashboard buildEvalItemHTML
@@ -514,14 +514,14 @@ export function renderProfilesView(appState, translations) {
 
             const indicatorNamesMap = {
               'Staff': 'Personnel',
-              'Facility': 'Équipements',
+              'Facility': 'Infrastructures',
               'Programs': 'Programmes',
               'InvestmentAmount': 'Investissements',
               'JobsCreated': 'Emplois créés',
               'ValueAdded': 'Valeur ajoutée',
-              'PollutionEmission': 'Pollution & Émissions',
+              'PollutionEmission': 'Émission de pollution',
               'ResourceConsumption': 'Consommation de ressources',
-              'Resilience': 'Résilience'
+              'Resilience': 'Résilience aux catastrophes'
             };
 
             const rawCategory = item.category || item.indicatorCategory || '';
@@ -1177,8 +1177,8 @@ export function attachProfilesEvents(containerEl, appState, renderCallback, onEx
 
       try {
         initRadarChart('profile-radar-econ',   'Économique',       ['Investissement', 'Emplois', 'Valeur Ajoutée'],    scores.econ, '#2563EB');
-        initRadarChart('profile-radar-social', 'Social',           ['Équipements', 'Personnel', 'Programmes'],         scores.social, '#EA5455');
-        initRadarChart('profile-radar-env',    'Environnemental',  ['Pollution', 'Ressources', 'Résilience'],          scores.env, '#00A859');
+        initRadarChart('profile-radar-social', 'Social',           ['Infrastructures', 'Personnel', 'Programmes'],     scores.social, '#EA5455');
+        initRadarChart('profile-radar-env',    'Environnemental',  ['Émission de pollution', 'Ressources', 'Résilience'], scores.env, '#00A859');
       } catch (e) {
         console.warn('Enterprise radar render error:', e);
       }

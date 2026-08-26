@@ -27,7 +27,7 @@ export const sectorData = {
     // Environmental
     PollutionEmission: ["Waste", "GHG"],
     ResourceConsumption: ["Water", "Energy"],
-    Resilience: ["Floods", "Earthquakes"]
+    Resilience: ["Floods", "Fires", "Earthquakes"]
   },
 
   macroSectors: [

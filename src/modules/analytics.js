@@ -11,14 +11,14 @@ import { attachLightboxToImages } from '../utils/imageLightbox.js';
 // ─── Module-level helper: build HTML for a single evaluation card item ───────
 const indicatorNamesMap = {
   'Staff': 'Personnel',
-  'Facility': 'Équipements',
+  'Facility': 'Infrastructures',
   'Programs': 'Programmes',
   'InvestmentAmount': 'Investissements',
   'JobsCreated': 'Emplois créés',
   'ValueAdded': 'Valeur ajoutée',
-  'PollutionEmission': 'Pollution & Émissions',
+  'PollutionEmission': 'Émission de pollution',
   'ResourceConsumption': 'Consommation de ressources',
-  'Resilience': 'Résilience'
+  'Resilience': 'Résilience aux catastrophes'
 };
 
 function buildEvalItemHTML(rev) {
@@ -114,6 +114,138 @@ function buildEvalItemHTML(rev) {
   `;
 }
 
+// ─── Module-level helper: filter evaluations based on all active appState slicers ───
+export function getFilteredEvaluations(appState) {
+  if (!appState) return [];
+
+  // ONLY use Firestore-backed sources — never data.evaluations or appState.evaluations
+  // which may contain stale localStorage/mock data
+  const allEvalsData = [
+    ...((appState.data && appState.data.recentEvaluations) ? appState.data.recentEvaluations : []),
+    ...((appState.currentUserEvals) ? appState.currentUserEvals : [])
+  ];
+
+  const evalsMap = new Map();
+  allEvalsData.forEach(e => {
+    if (e) {
+      const key = e.id || `${e.targetEntity || e.actorName}-${e.rating}-${e.date || ''}-${e.comment || ''}`;
+      evalsMap.set(key, e);
+    }
+  });
+  const evals = Array.from(evalsMap.values());
+
+  const normStr = (s) => !s ? '' : String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '').trim();
+
+  const selectedCountryCode = appState.selectedCountry || 'TN';
+  const selectedMacro = appState.selectedMacro || 'ALL';
+  const selectedMeso = appState.selectedMeso || 'ALL';
+  const selectedPillar = appState.selectedPillar || 'ALL';
+  const selectedCategory = appState.selectedCategory || 'ALL';
+  const selectedType = appState.selectedType || 'ALL';
+  const selectedActor = appState.selectedActor || 'ALL';
+  const selectedRegions = (appState.selectedRegions || []).map(normStr);
+  const selectedLocalities = (appState.selectedLocalities || []).map(normStr);
+
+  const sectorKeywords = {
+    Governance: ['gouv', 'gov', 'just', 'parl', 'minist', 'tribun', 'governance', 'gouvernance'],
+    SecurityDefense: ['securite', 'secu', 'defense', 'def', 'police', 'polic', 'gendarmerie', 'gend', 'armee', 'securitydefense'],
+    HealthHygiene: ['sante', 'sant', 'hygiene', 'hyg', 'medecine', 'med', 'pharmacie', 'pharm', 'hopital', 'hopit', 'clinique', 'healthhygiene'],
+    InstructionCulture: ['instruction', 'inst', 'culture', 'cult', 'education', 'educ', 'universite', 'univ', 'ecole', 'ecol', 'lycee', 'instructionculture'],
+    FoodFinance: ['alimentation', 'alim', 'finance', 'finan', 'agriculture', 'agri', 'banque', 'banq', 'bourse', 'assurance', 'foodfinance'],
+    HousingTourism: ['logement', 'log', 'tourisme', 'tour', 'hotel', 'hot', 'immobilier', 'immo', 'urbanisme', 'housingtourism'],
+    TransportTelco: ['transport', 'trans', 'telecoms', 'tel', 'telephonie', 'internet', 'route', 'rout', 'bus', 'train', 'post', 'transporttelco']
+  };
+
+  return evals.filter(rev => {
+    // 1. Country filter
+    if (rev.country && selectedCountryCode && normStr(rev.country) !== normStr(selectedCountryCode)) {
+      return false;
+    }
+
+    // 2. Actor filter (if chosen)
+    if (selectedActor && selectedActor !== 'ALL') {
+      const eActor = normStr(rev.targetEntity || rev.actorName || rev.entity || '');
+      const sActor = normStr(selectedActor);
+      if (!eActor || (!eActor.includes(sActor) && !sActor.includes(eActor))) {
+        return false;
+      }
+    }
+
+    // 3. Macro-Sector filter
+    if (selectedMacro && selectedMacro !== 'ALL') {
+      const eMacro = normStr(rev.macroSector || rev.sectorName || rev.sector || '');
+      const sMacro = normStr(selectedMacro);
+      const keywords = sectorKeywords[selectedMacro] || [sMacro];
+      const matchesMacro = (eMacro && (eMacro.includes(sMacro) || sMacro.includes(eMacro))) ||
+                           keywords.some(k => eMacro.includes(k));
+      if (!matchesMacro) return false;
+    }
+
+    // 4. Meso-Sector (Sous-secteur) filter
+    if (selectedMeso && selectedMeso !== 'ALL') {
+      const eMeso = normStr(rev.mesoSector || rev.subSector || '');
+      const sMeso = normStr(selectedMeso);
+      if (!eMeso || (!eMeso.includes(sMeso) && !sMeso.includes(eMeso))) {
+        return false;
+      }
+    }
+
+    // 5. Pillar filter
+    if (selectedPillar && selectedPillar !== 'ALL') {
+      const pNorm = normStr(rev.pillar || rev.societalPillar || '');
+      if (selectedPillar === 'Economic' && !pNorm.includes('econ')) return false;
+      if (selectedPillar === 'Social' && !pNorm.includes('soc')) return false;
+      if (selectedPillar === 'Environmental' && !pNorm.includes('env')) return false;
+    }
+
+    // 6. Category (Indicator) filter
+    if (selectedCategory && selectedCategory !== 'ALL') {
+      const catStr = normStr(rev.category || rev.indicatorCategory || '');
+      const sCat = normStr(selectedCategory);
+      if (!catStr || (!catStr.includes(sCat) && !sCat.includes(catStr))) {
+        return false;
+      }
+    }
+
+    // 7. Type (Sub-indicator) filter
+    if (selectedType && selectedType !== 'ALL') {
+      const typeStr = normStr(rev.type || rev.indicatorType || rev.kpi || rev.indicator || '');
+      const sType = normStr(selectedType);
+      if (!typeStr || (!typeStr.includes(sType) && !sType.includes(typeStr))) {
+        return false;
+      }
+    }
+
+    // 8. Territory filter (Localities or Regions)
+    if (selectedLocalities.length > 0) {
+      // Locality filter: exact match (no partial)
+      const locStr = normStr(rev.locality || '');
+      const matchesLoc = selectedLocalities.some(l => locStr && locStr === l);
+      if (!matchesLoc) return false;
+    } else if (selectedRegions.length > 0) {
+      const regStr = normStr(rev.region || '');
+      const locStr = normStr(rev.locality || '');
+      // Use imported locationData to validate locality belongs to the selected region
+      const countryObj = locationData.find(c => normStr(c.code) === normStr(selectedCountryCode));
+      const matchesReg = selectedRegions.some(rNorm => {
+        // 1. Region field direct match
+        if (regStr && (regStr === rNorm || regStr.includes(rNorm) || rNorm.includes(regStr))) return true;
+        // 2. Locality EXACT match against the region's official locality list (prevents cross-region collisions)
+        if (locStr && countryObj) {
+          const rObj = countryObj.regions.find(r => normStr(r.id) === rNorm);
+          if (rObj && rObj.localities) {
+            return rObj.localities.some(loc => normStr(loc) === locStr);
+          }
+        }
+        return false;
+      });
+      if (!matchesReg) return false;
+    }
+
+    return true;
+  }).sort((a, b) => (b.createdAtSeconds || 0) - (a.createdAtSeconds || 0));
+}
+
 // ----------- Radar Charts: Granular per-category computation from Firestore evaluations -----------
 export function getRadarScoresFromEvals(actorName, appState) {
   if (!appState) return { econ: [0, 0, 0], social: [0, 0, 0], env: [0, 0, 0] };
@@ -160,7 +292,7 @@ export function getRadarScoresFromEvals(actorName, appState) {
     // Environmental
     'PollutionEmission': ['pollutionemission', 'waste', 'ghg', 'pollut', 'dechet', 'emission'],
     'ResourceConsumption': ['resourceconsumption', 'water', 'energy', 'resour', 'ressour', 'eau', 'energie'],
-    'Resilience': ['resilience', 'floods', 'earthquakes', 'resili', 'climat', 'risq', 'inondation', 'seisme']
+    'Resilience': ['resilience', 'floods', 'fires', 'earthquakes', 'resili', 'climat', 'risq', 'inondation', 'incendie', 'seisme']
   };
 
   const getAxisScore = (pillarKey, categoryKey, keywords) => {
@@ -349,13 +481,12 @@ export function renderAnalyticsView(appState, translations) {
     const socialRadarHTML = renderRadarChartHTML('radar-canvas-social', 'SOCIAL');
     const envRadarHTML = renderRadarChartHTML('radar-canvas-env', 'ENVIRONNEMENTAL');
 
-    const activeCountryEvals = realEvals.filter(r => !r.country || r.country === selectedCountryCode);
-    const displayEvals = (activeCountryEvals.length > 0 ? activeCountryEvals : realEvals)
-      .slice()
-      .sort((a, b) => (b.createdAtSeconds || 0) - (a.createdAtSeconds || 0));
+    const displayEvals = getFilteredEvaluations(appState);
     const recentRatingsHTML = displayEvals.length > 0
       ? displayEvals.slice(0, 10).map(buildEvalItemHTML).join('')
-      : `<div style="text-align: center; padding: 16px; color: #64748B; font-size: 11px;">Aucune évaluation pour ce filtre.</div>`;
+      : `<div style="text-align: center; padding: 24px 16px; color: #64748B; font-size: 11.5px; font-weight: 500;">
+           ℹ️ Aucune évaluation ne correspond aux critères sélectionnés.
+         </div>`;
 
 
     return `
@@ -572,17 +703,25 @@ export function renderAnalyticsView(appState, translations) {
             return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-size="6.5" fill="#475569" text-anchor="end" font-weight="600" transform="rotate(-45, ${x.toFixed(1)}, ${y.toFixed(1)})">${item.label}</text>`;
           }).join('');
 
-          // Curves
+          // Curves with numeric badges
           const curveSVG = chartCurves.map(curve => {
-            const pts = curve.scores.map((s, i) => ({ x: xPos(i), y: yPos(s) }));
+            const pts = curve.scores.map((s, i) => ({ x: xPos(i), y: yPos(s), score: s }));
             const d = pts.map((p, i) => (i === 0 ? `M ${p.x.toFixed(1)},${p.y.toFixed(1)}` : `L ${p.x.toFixed(1)},${p.y.toFixed(1)}`)).join(' ');
-            const dotsSVG = pts.map(p => `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2.5" fill="${curve.color}"/>`).join('');
+            const dotsSVG = pts.map(p => {
+              const valText = p.score > 0
+                ? `<text x="${p.x.toFixed(1)}" y="${(p.y - 7).toFixed(1)}" font-size="7.5" font-weight="800" fill="${curve.color}" text-anchor="middle">${p.score.toFixed(1)}</text>`
+                : `<text x="${p.x.toFixed(1)}" y="${(padT + chartH + 7).toFixed(1)}" font-size="6" font-weight="600" fill="#94A3B8" text-anchor="middle">0</text>`;
+              return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" fill="${curve.color}" stroke="#FFFFFF" stroke-width="1"/>${valText}`;
+            }).join('');
             return `<path d="${d}" fill="none" stroke="${curve.color}" stroke-width="2" stroke-linejoin="round"/>${dotsSVG}`;
           }).join('');
 
-          // Legend (like dashboard: colored circle + full name + score range)
+          // Legend
           const legendHTML = chartCurves.map(curve => {
-            const avgScore = (curve.scores.reduce((a, b) => a + b, 0) / curve.scores.length).toFixed(1);
+            const evaluatedScores = curve.scores.filter(s => s > 0);
+            const avgScore = evaluatedScores.length > 0
+              ? (evaluatedScores.reduce((a, b) => a + b, 0) / evaluatedScores.length).toFixed(1)
+              : '0.0';
             const scoreColor = parseFloat(avgScore) >= 4.0 ? '#00A859' : parseFloat(avgScore) >= 3.0 ? '#28C76F' : parseFloat(avgScore) >= 2.0 ? '#FFB800' : parseFloat(avgScore) >= 1.0 ? '#FF9F43' : '#DC2626';
             return `<div style="display:flex;align-items:center;gap:5px;padding:5px 8px;background:#F8FAFC;border-radius:8px;">
               <span style="width:10px;height:10px;border-radius:50%;background:${curve.color};flex-shrink:0;"></span>
@@ -682,6 +821,62 @@ export function renderAnalyticsView(appState, translations) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: compute all filter-dependent card data from appState
 // ─────────────────────────────────────────────────────────────────────────────
+// ─── Module-level helper: compute state and curves for analytics view ───────
+const mesoSectorKeywords = {
+  // Governance
+  Parlement: ['parlement', 'parl', 'depute', 'assemblee', 'parliament', 'مجلس', 'برلمان'],
+  Gouvernement: ['gouvernement', 'gouv', 'gov', 'minist', 'cabinet', 'premier', 'government', 'حكومة', 'وزارة'],
+  Justice: ['justice', 'just', 'tribunal', 'tribun', 'juge', 'cour', 'magistrat', 'avocat', 'عدالة', 'محكمة'],
+
+  // Security & Defense
+  Police: ['police', 'polic', 'commissariat', 'poste de police', 'شرطة', 'أمن'],
+  Gendarmerie: ['gendarmerie', 'gend', 'garde nationale', 'garde', 'حرس'],
+  Pompiers: ['pompier', 'pompiers', 'protection civile', 'incendie', 'firefighter', 'حماية مدنية', 'إطفاء'],
+  ArmeeTerre: ['armeeterre', 'armee de terre', 'armee', 'milit', 'terre', 'army', 'جيش بري'],
+  MarineNationale: ['marinenationale', 'marine', 'mer', 'cotiere', 'navy', 'بحرية'],
+  ArmeeAir: ['armeeair', 'armee de lair', 'air', 'aviation', 'force aerienne', 'air force', 'طيران'],
+
+  // Health & Hygiene
+  Medecine: ['medecine', 'medecin', 'médecine', 'médecin', 'med', 'hopital', 'hôpital', 'hopit', 'clinique', 'dispensaire', 'docteur', 'urgenc', 'soin', 'sante', 'santé', 'cabinet medical', 'polyclinique', 'centre de sante', 'chu', 'طب', 'مستشفى', 'عيادة', 'صحة'],
+  Pharmacie: ['pharmacie', 'pharm', 'medicament', 'médicament', 'officine', 'drugstore', 'صيدلة', 'دواء'],
+  Biologie: ['biologie', 'bio', 'laboratoire', 'analyse', 'labo', 'تحاليل', 'مخبر'],
+  GestionDechets: ['gestiondechet', 'gestion des dechets', 'gestion des déchets', 'dechet', 'déchet', 'ordur', 'poubelle', 'collecte', 'recyclage', 'waste', 'proprete', 'propreté', 'نفايات', 'قمامة'],
+  Assainissement: ['assainissement', 'onass', 'egout', 'égout', 'eau usee', 'eau usée', 'sanitation', 'تطهير'],
+  ProtectionEnvironnement: ['protectionenvironnement', 'protection de lenvironnement', 'protection de l\'environnement', 'environnement', 'ecologie', 'écologie', 'foret', 'forêt', 'anpe', 'dpm', 'parc', 'بيئة'],
+
+  // Instruction & Culture
+  Education: ['education', 'éducation', 'educ', 'éduc', 'ecole', 'école', 'lycee', 'lycée', 'college', 'collège', 'primaire', 'secondaire', 'scolaire', 'تعليم', 'مدرسة'],
+  EnseignementSuperieur: ['enseignementsuperieur', 'enseignement superieur', 'enseignement supérieur', 'superieur', 'supérieur', 'universite', 'université', 'univ', 'faculte', 'faculté', 'fac', 'institut', 'campus', 'جامعة', 'كلية'],
+  FormationProfessionnelle: ['formationprofessionnelle', 'formation professionnelle', 'formation', 'apprentissage', 'metier', 'métier', 'centre de formation', 'تكوين مهني'],
+  Arts: ['arts', 'art', 'theatre', 'théâtre', 'cinema', 'cinéma', 'musee', 'musée', 'galerie', 'exposition', 'culture', 'فنون', 'مسرح', 'سينما', 'متحف'],
+  Sports: ['sports', 'sport', 'stade', 'complexe', 'piscine', 'gymnase', 'club', 'رياضة', 'ملعب'],
+  Cultes: ['cultes', 'culte', 'mosquee', 'mosquée', 'eglise', 'église', 'synagogue', 'religieux', 'شؤون دينية', 'جامع', 'مسجد'],
+
+  // Food & Finance
+  Agriculture: ['agriculture', 'agri', 'ferme', 'recolte', 'récolte', 'peche', 'pêche', 'elevage', 'élevage', 'فلاحة', 'زراعة', 'صيد'],
+  Industrie: ['industrie', 'indus', 'usine', 'fabrique', 'manufacture', 'agroalimentaire', 'صناعة', 'معمل'],
+  Commerce: ['commerce', 'comm', 'marche', 'marché', 'magasin', 'supermarche', 'supermarché', 'boutique', 'grossiste', 'تجارة', 'سوق', 'محل'],
+  Banque: ['banque', 'banq', 'bank', 'credit', 'crédit', 'agence bancaire', 'atm', 'distributeur', 'بنك', 'مصرف'],
+  Bourse: ['bourse', 'bvmt', 'marche financier', 'marché financier', 'action', 'titre', 'بورصة'],
+  Assurance: ['assurance', 'assur', 'compagnie dassurance', 'compagnie d\'assurance', 'sinistre', 'تأمين'],
+
+  // Housing & Tourism
+  Logement: ['logement', 'log', 'immobilier', 'immo', 'residence', 'résidence', 'habitat', 'foyer', 'سكن', 'عقار'],
+  AmenagementTerritoire: ['amenagement', 'aménagement', 'territoire', 'urbanisme', 'cadastre', 'voirie', 'municipalite', 'municipalité', 'تهيئة ترابية', 'بلدية'],
+  EquipementsPublics: ['equipement', 'équipement', 'public', 'infrastructure', 'eclairage', 'éclairage', 'espace vert', 'jardin', 'تجهيزات عمومية', 'حديقة'],
+  Hotellerie: ['hotellerie', 'hôtellerie', 'hotel', 'hôtel', 'auberge', 'resort', 'chambre', 'فندقة', 'نزل', 'فندق'],
+  Restauration: ['restauration', 'restaurant', 'resto', 'cafe', 'café', 'cafet', 'salon de the', 'salon de thé', 'مطعم', 'مقهى'],
+  AgencesVoyages: ['voyage', 'tourisme', 'tour', 'agence', 'guide', 'excursion', 'travel', 'وكالة أسفar', 'سياحة'],
+
+  // Transport & Telco
+  TransportTerrestre: ['transportterrestre', 'transport terrestre', 'terrestre', 'bus', 'train', 'sncft', 'metro', 'métro', 'taxi', 'louage', 'route', 'gare', 'نقل بري', 'حافلة', 'قطار'],
+  TransportMaritime: ['transportmaritime', 'transport maritime', 'maritime', 'port', 'bateau', 'ferry', 'navire', 'ctn', 'نقل بحري', 'ميناء'],
+  TransportAerien: ['transportaerien', 'transport aerien', 'transport aérien', 'aerien', 'aérien', 'aeroport', 'aéroport', 'avion', 'tunisair', 'vol', 'نقل جوي', 'مطار', 'طائرة'],
+  Poste: ['poste', 'post', 'courrier', 'colis', 'facteur', 'bureau de poste', 'بريد'],
+  Telecommunications: ['telecommunication', 'télécommunication', 'telecom', 'télécom', 'tel', 'tél', 'operateur', 'opérateur', 'telephonie', 'téléphonie', 'mobile', 'fibre', 'tt', 'ooredoo', 'orange', 'اتصالات'],
+  InternetMedias: ['internet', 'media', 'médias', 'web', 'presse', 'radio', 'television', 'télévision', 'tv', 'journal', 'إنترنت', 'إعلام']
+};
+
 function computeFilterState(appState, lang) {
   const selectedCountryCode = appState.selectedCountry || 'TN';
   const selectedCountryObj = locationData.find(c => c.code === selectedCountryCode) || locationData[0];
@@ -697,8 +892,22 @@ function computeFilterState(appState, lang) {
     ALL: '', Economic: 'Économique', Social: 'Sociale', Environmental: 'Environnementale'
   };
 
-  // ── REAL EVALUATIONS ──────────────────────────────────────────────────────
-  const allEvals = (appState.data && appState.data.recentEvaluations) ? appState.data.recentEvaluations : [];
+  // ── UNIFIED REAL EVALUATIONS POOL — Firestore sources only ──────────────────
+  // data.evaluations and appState.evaluations are excluded: they may contain
+  // stale localStorage data or old mock records.
+  const allEvalsData = [
+    ...((appState.data && appState.data.recentEvaluations) ? appState.data.recentEvaluations : []),
+    ...((appState.currentUserEvals) ? appState.currentUserEvals : [])
+  ];
+
+  const evalsMap = new Map();
+  allEvalsData.forEach(e => {
+    if (e) {
+      const key = e.id || `${e.targetEntity || e.actorName}-${e.rating}-${e.date || ''}-${e.comment || ''}`;
+      evalsMap.set(key, e);
+    }
+  });
+  const allEvals = Array.from(evalsMap.values());
 
   // Helper: normalize pillar
   const normalizePillar = (pStr) => {
@@ -712,13 +921,13 @@ function computeFilterState(appState, lang) {
 
   // Helper: normalize sector to macroSector id
   const sectorMapKeys = [
-    { id: "Governance",         keywords: ["gouv", "gov", "just", "parl"] },
-    { id: "SecurityDefense",    keywords: ["séc", "secu", "def", "polic", "gend"] },
-    { id: "HealthHygiene",      keywords: ["sant", "hyg", "med", "pharm", "hopit", "hôpit"] },
-    { id: "InstructionCulture", keywords: ["inst", "cult", "educ", "éduc", "univ", "ecol", "écol"] },
-    { id: "FoodFinance",        keywords: ["alim", "finan", "banq", "resta", "cafet"] },
-    { id: "HousingTourism",     keywords: ["log", "tour", "hotel", "hôt"] },
-    { id: "TransportTelco",     keywords: ["trans", "tel", "tél", "post", "auto"] }
+    { id: "Governance",         keywords: ["gouv", "gov", "just", "parl", "governance", "gouvernance"] },
+    { id: "SecurityDefense",    keywords: ["séc", "secu", "def", "polic", "gend", "securitydefense", "sécurité"] },
+    { id: "HealthHygiene",      keywords: ["sant", "hyg", "med", "pharm", "hopit", "hôpit", "healthhygiene", "santé"] },
+    { id: "InstructionCulture", keywords: ["inst", "cult", "educ", "éduc", "univ", "ecol", "écol", "instructionculture"] },
+    { id: "FoodFinance",        keywords: ["alim", "finan", "banq", "resta", "cafet", "foodfinance", "agriculture"] },
+    { id: "HousingTourism",     keywords: ["log", "tour", "hotel", "hôt", "housingtourism", "logement"] },
+    { id: "TransportTelco",     keywords: ["trans", "tel", "tél", "post", "auto", "transporttelco", "transport"] }
   ];
   const normalizeSector = (s) => {
     if (!s) return null;
@@ -730,11 +939,12 @@ function computeFilterState(appState, lang) {
     return matched ? matched.id : null;
   };
 
-  // Filter evals by current filters
+  const normalizeStrLocal = (str) => !str ? '' : String(str).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'').trim();
+
   const filterEvals = (evals) => {
     return evals.filter(e => {
       const eCountry = e.country || selectedCountryCode;
-      if (eCountry !== selectedCountryCode) return false;
+      if (normalizeStrLocal(eCountry) !== normalizeStrLocal(selectedCountryCode)) return false;
       if (selectedPillar !== 'ALL') {
         const p = normalizePillar(e.pillar || e.societalPillar);
         if (p !== selectedPillar) return false;
@@ -744,22 +954,35 @@ function computeFilterState(appState, lang) {
         if (sec !== selectedMacro) return false;
       }
       if (selectedRegions.length > 0) {
-        // Use normalizeStr for robust accent-insensitive region matching
-        const normalizeS = (s) => !s ? '' : String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
-        const eRegNorm = normalizeS(e.region);
-        const eLocNorm = normalizeS(e.locality);
-        const eLocanorm = normalizeS(e.location);
+        const eRegNorm = normalizeStrLocal(e.region);
+        const eLocNorm = normalizeStrLocal(e.locality);
         const matches = selectedRegions.some(rId => {
-          const rNorm = normalizeS(rId);
-          return eRegNorm === rNorm || eRegNorm.includes(rNorm) || rNorm.includes(eRegNorm) ||
-                 eLocNorm.includes(rNorm) || rNorm.includes(eLocNorm) ||
-                 eLocanorm.includes(rNorm);
+          const rObj = activeRegions.find(r => r.id === rId);
+          const rNorm = normalizeStrLocal(rId);
+          const rNameNorm = rObj ? normalizeStrLocal(rObj.names[lang] || rObj.names.fr) : rNorm;
+
+          // 1. Region field matches — ONLY when eRegNorm is non-empty (empty string must not match anything)
+          const regionFieldMatches = eRegNorm !== '' && (
+            eRegNorm === rNorm || eRegNorm === rNameNorm ||
+            eRegNorm.includes(rNorm) || rNorm.includes(eRegNorm)
+          );
+
+          // 2. Locality field: EXACT match against the region's official locality list ONLY
+          //    (prevents "Médina" from Tunis matching "Sousse Médina" from Sousse)
+          //    ONLY used when the locality field is non-empty
+          const rLocs = (rObj && rObj.localities) ? rObj.localities.map(normalizeStrLocal) : [];
+          const localityInRegion = eLocNorm !== '' && rLocs.length > 0 && rLocs.some(loc => loc && eLocNorm === loc);
+
+          return regionFieldMatches || localityInRegion;
         });
         if (!matches) return false;
       }
       if (selectedLocalities.length > 0) {
-        const eLoc = String(e.locality || '').toLowerCase();
-        const matches = selectedLocalities.some(l => eLoc.includes(l.toLowerCase()) || l.toLowerCase().includes(eLoc));
+        const eLoc = normalizeStrLocal(e.locality);
+        const matches = selectedLocalities.some(l => {
+          const lNorm = normalizeStrLocal(l);
+          return eLoc === lNorm || (eLoc && (eLoc.includes(lNorm) || lNorm.includes(eLoc)));
+        });
         if (!matches) return false;
       }
       return true;
@@ -771,8 +994,6 @@ function computeFilterState(appState, lang) {
   const selectedRegionObjs = selectedRegions.map(rId => activeRegions.find(r => r.id === rId)).filter(Boolean);
   const isShowingLocalities = selectedLocalities.length > 0 || selectedRegionObjs.length > 0;
 
-  // Compute regional scores from real evals using normalizeStr
-  const normalizeStrLocal = (str) => !str ? '' : String(str).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
   const regionTotals = {}, regionCounts = {};
   allEvals.forEach(e => {
     const eRegion = normalizeStrLocal(e.region);
@@ -799,7 +1020,7 @@ function computeFilterState(appState, lang) {
 
   const getRegionScore = (rId) => regionCounts[rId] > 0
     ? parseFloat((regionTotals[rId] / regionCounts[rId]).toFixed(1))
-    : null; // null = no real data, will show N/A
+    : null;
 
   const territorialItems = isShowingLocalities
     ? (() => {
@@ -847,12 +1068,30 @@ function computeFilterState(appState, lang) {
     : macroSectorsDef.map(s => ({ id: s.id, label: s.label }));
 
   // Helper to compute sector scores for a filtered subset of evals
+  // STRICT: only match on the explicit mesoSector/subSector field (exact ID or ≥5-char keyword)
+  // This prevents false-positive cross-contamination between sub-sectors
   const getSectorScoreForEvals = (evalsSubset, secId) => {
-    const secEvals = evalsSubset.filter(e => {
-      const sec = normalizeSector(e.sectorName || e.macroSector || e.sector);
-      return sec === secId;
-    });
-    if (secEvals.length === 0) return 0;
+    const secNorm = normalizeStrLocal(secId);
+
+    let secEvals;
+    if (selectedMacro !== 'ALL') {
+      const allowedKeywords = (mesoSectorKeywords[secId] || []).map(normalizeStrLocal).filter(k => k.length >= 5);
+      secEvals = evalsSubset.filter(e => {
+        const eMeso = normalizeStrLocal(e.mesoSector || e.subSector || '');
+        if (!eMeso) return false; // no meso field → cannot assign to any sub-sector
+        // Exact ID match
+        if (eMeso === secNorm) return true;
+        // Long-keyword match only (≥5 chars prevents short-token false positives like "med", "bio", "art")
+        return allowedKeywords.some(k => eMeso === k);
+      });
+    } else {
+      secEvals = evalsSubset.filter(e => {
+        const sec = normalizeSector(e.sectorName || e.macroSector || e.sector);
+        return sec === secId;
+      });
+    }
+
+    if (!secEvals || secEvals.length === 0) return 0;
     return parseFloat((secEvals.reduce((s, e) => s + (parseFloat(e.rating) || 0), 0) / secEvals.length).toFixed(1));
   };
 
@@ -865,6 +1104,16 @@ function computeFilterState(appState, lang) {
     chartCurves = selectedLocalities.map((locName, idx) => {
       const locNorm = normalizeStrLocal(locName);
       const locEvals = allEvals.filter(e => {
+        const eCountry = e.country || selectedCountryCode;
+        if (normalizeStrLocal(eCountry) !== normalizeStrLocal(selectedCountryCode)) return false;
+        if (selectedPillar !== 'ALL') {
+          const p = normalizePillar(e.pillar || e.societalPillar);
+          if (p !== selectedPillar) return false;
+        }
+        if (selectedMacro !== 'ALL') {
+          const sec = normalizeSector(e.sectorName || e.macroSector || e.sector);
+          if (sec !== selectedMacro) return false;
+        }
         const eLoc = normalizeStrLocal(e.locality);
         return eLoc === locNorm || (eLoc && locNorm && (eLoc.includes(locNorm) || locNorm.includes(eLoc)));
       });
@@ -880,12 +1129,30 @@ function computeFilterState(appState, lang) {
       const rName = rObj ? (rObj.names[lang] || rObj.names.fr) : rId;
       const rIdNorm = normalizeStrLocal(rId);
       const rNameNorm = normalizeStrLocal(rName);
+      const rLocsNorm = (rObj && rObj.localities) ? rObj.localities.map(normalizeStrLocal) : [];
 
       const regEvals = allEvals.filter(e => {
+        const eCountry = e.country || selectedCountryCode;
+        if (normalizeStrLocal(eCountry) !== normalizeStrLocal(selectedCountryCode)) return false;
+        if (selectedPillar !== 'ALL') {
+          const p = normalizePillar(e.pillar || e.societalPillar);
+          if (p !== selectedPillar) return false;
+        }
+        if (selectedMacro !== 'ALL') {
+          const sec = normalizeSector(e.sectorName || e.macroSector || e.sector);
+          if (sec !== selectedMacro) return false;
+        }
         const eReg = normalizeStrLocal(e.region);
-        const eLoca = normalizeStrLocal(e.location);
-        return eReg === rIdNorm || eReg === rNameNorm || (eReg && (eReg.includes(rIdNorm) || rIdNorm.includes(eReg))) ||
-               (eLoca && (eLoca.includes(rIdNorm) || eLoca.includes(rNameNorm)));
+        const eLoc = normalizeStrLocal(e.locality);
+        // Region field match (only when eReg is non-empty — empty string must NOT match anything)
+        const regionFieldMatch = eReg !== '' && (
+          eReg === rIdNorm || eReg === rNameNorm ||
+          eReg.includes(rIdNorm) || rIdNorm.includes(eReg)
+        );
+        // Locality field: EXACT match against official locality list ONLY (no substrings, no cross-region pollution)
+        const localityListMatch = eLoc !== '' && rLocsNorm.some(loc => loc && eLoc === loc);
+
+        return regionFieldMatch || localityListMatch;
       });
       return {
         name: `Performance moyenne — ${rName}`,
@@ -983,12 +1250,21 @@ function refreshFilteredCards(containerEl, appState, lang) {
       return `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-size="6.5" fill="#475569" text-anchor="end" font-weight="600" transform="rotate(-45, ${x.toFixed(1)}, ${y.toFixed(1)})">${item.label}</text>`;
     }).join('');
     const curveSVG = chartCurves.map(curve => {
-      const pts = curve.scores.map((s, i) => ({ x: xPos(i), y: yPos(s) }));
+      const pts = curve.scores.map((s, i) => ({ x: xPos(i), y: yPos(s), score: s }));
       const d = pts.map((p, i) => (i === 0 ? `M ${p.x.toFixed(1)},${p.y.toFixed(1)}` : `L ${p.x.toFixed(1)},${p.y.toFixed(1)}`)).join(' ');
-      return `<path d="${d}" fill="none" stroke="${curve.color}" stroke-width="2" stroke-linejoin="round"/>${pts.map(p => `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2.5" fill="${curve.color}"/>`).join('')}`;
+      const dotsSVG = pts.map(p => {
+        const valText = p.score > 0
+          ? `<text x="${p.x.toFixed(1)}" y="${(p.y - 7).toFixed(1)}" font-size="7.5" font-weight="800" fill="${curve.color}" text-anchor="middle">${p.score.toFixed(1)}</text>`
+          : `<text x="${p.x.toFixed(1)}" y="${(padT + chartH + 7).toFixed(1)}" font-size="6" font-weight="600" fill="#94A3B8" text-anchor="middle">0</text>`;
+        return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" fill="${curve.color}" stroke="#FFFFFF" stroke-width="1"/>${valText}`;
+      }).join('');
+      return `<path d="${d}" fill="none" stroke="${curve.color}" stroke-width="2" stroke-linejoin="round"/>${dotsSVG}`;
     }).join('');
     const legendHTML = chartCurves.map(curve => {
-      const avg = (curve.scores.reduce((a, b) => a + b, 0) / curve.scores.length).toFixed(1);
+      const evaluatedScores = curve.scores.filter(s => s > 0);
+      const avg = evaluatedScores.length > 0
+        ? (evaluatedScores.reduce((a, b) => a + b, 0) / evaluatedScores.length).toFixed(1)
+        : '0.0';
       const scoreColor = parseFloat(avg) >= 4.0 ? '#00A859' : parseFloat(avg) >= 3.0 ? '#28C76F' : parseFloat(avg) >= 2.0 ? '#FFB800' : parseFloat(avg) >= 1.0 ? '#FF9F43' : '#DC2626';
       return `<div style="display:flex;align-items:center;gap:5px;padding:5px 8px;background:#F8FAFC;border-radius:8px;"><span style="width:10px;height:10px;border-radius:50%;background:${curve.color};flex-shrink:0;"></span><span style="font-size:10px;color:#1E293B;font-weight:600;flex:1;">${curve.name}</span><span style="font-size:10px;font-weight:800;color:${scoreColor};">${avg}</span></div>`;
     }).join('');
@@ -1057,17 +1333,31 @@ export function attachAnalyticsEvents(containerEl, appState, onStateChangeCallba
     appState.selectedLocalities = [];
   }
 
-  // Country Change -> Immediately update region/locality dropdowns, then re-render map
+  // ----------- Evaluations feed: reactive multi-criteria refresh -----------
+  function refreshEvaluationsFeed() {
+    const feed = document.getElementById('evaluations-feed');
+    if (!feed) return;
+    const filtered = getFilteredEvaluations(appState);
+    if (filtered.length === 0) {
+      feed.innerHTML = `<div style="text-align:center; color:#94A3B8; font-size:12px; padding:24px 12px; font-weight:500;">ℹ️ Aucune évaluation trouvée pour les critères de filtres sélectionnés.</div>`;
+    } else {
+      feed.innerHTML = filtered.slice(0, 10).map(buildEvalItemHTML).join('');
+      attachLightboxToImages(feed);
+    }
+  }
+
+  // Country Change -> Immediately update region/locality dropdowns, then re-render map & feed
   if (countrySelect) {
     countrySelect.addEventListener('change', () => {
       const code = countrySelect.value;
       appState.selectedCountry = code;
       updateRegionDropdown(code);
       if (onStateChangeCallback) onStateChangeCallback();
+      else refreshEvaluationsFeed();
     });
   }
 
-  // Region Multi-Select Change -> Updates Localités dropdown AND refreshes cards
+  // Region Multi-Select Change -> Updates Localités dropdown, refreshes cards & feed
   if (regionSelect) {
     regionSelect.addEventListener('change', () => {
       const code = countrySelect ? countrySelect.value : 'SN';
@@ -1094,23 +1384,26 @@ export function attachAnalyticsEvents(containerEl, appState, onStateChangeCallba
       }
 
       refreshFilteredCards(containerEl, appState, lang);
+      refreshEvaluationsFeed();
     });
   }
 
-  // Locality Multi-Select Change -> Updates appState.selectedLocalities and refreshes cards
+  // Locality Multi-Select Change -> Updates appState.selectedLocalities and refreshes cards & feed
   if (localitySelect) {
     localitySelect.addEventListener('change', () => {
       const selectedLocs = Array.from(localitySelect.selectedOptions).map(o => o.value);
       appState.selectedLocalities = selectedLocs;
       refreshFilteredCards(containerEl, appState, lang);
+      refreshEvaluationsFeed();
     });
   }
 
-  // Macro-Sector Change -> Updates Méso-Secteur dropdown + refreshes performance cards
+  // Macro-Sector Change -> Updates Méso-Secteur dropdown + refreshes performance cards & feed
   if (macroSelect) {
     macroSelect.addEventListener('change', () => {
       const macroVal = macroSelect.value;
       appState.selectedMacro = macroVal;
+      appState.selectedMeso = 'ALL';
       if (mesoSelect) {
         if (macroVal !== 'ALL') {
           const mesos = sectorData.mesoSectors[macroVal] || [];
@@ -1122,14 +1415,26 @@ export function attachAnalyticsEvents(containerEl, appState, onStateChangeCallba
         }
       }
       refreshFilteredCards(containerEl, appState, lang);
+      refreshEvaluationsFeed();
     });
   }
 
-  // Pillar Change -> Updates Indicateur dropdown AND refreshes performance cards
+  // Meso-Sector (Sous-secteur) Change -> Refreshes cards & evaluations feed
+  if (mesoSelect) {
+    mesoSelect.addEventListener('change', () => {
+      appState.selectedMeso = mesoSelect.value;
+      refreshFilteredCards(containerEl, appState, lang);
+      refreshEvaluationsFeed();
+    });
+  }
+
+  // Pillar Change -> Updates Indicateur dropdown AND refreshes performance cards & feed
   if (pillarSelect) {
     pillarSelect.addEventListener('change', () => {
       const pillarVal = pillarSelect.value;
       appState.selectedPillar = pillarVal;
+      appState.selectedCategory = 'ALL';
+      appState.selectedType = 'ALL';
       const categories = sectorData.indicatorCategories[pillarVal] || [];
       if (indicatorSelect) {
         indicatorSelect.innerHTML = `<option value="ALL">Indicateur: Tous</option>` + categories.map(cat => `
@@ -1138,20 +1443,31 @@ export function attachAnalyticsEvents(containerEl, appState, onStateChangeCallba
       }
       if (subIndicatorSelect) subIndicatorSelect.innerHTML = `<option value="ALL">Sous-Indicateur: Tous</option>`;
       refreshFilteredCards(containerEl, appState, lang);
+      refreshEvaluationsFeed();
     });
   }
 
-  // Indicator Change -> Updates Sous-Indicateur dropdown
+  // Indicator Change -> Updates Sous-Indicateur dropdown & refreshes feed
   if (indicatorSelect) {
     indicatorSelect.addEventListener('change', () => {
       const catVal = indicatorSelect.value;
       appState.selectedCategory = catVal;
+      appState.selectedType = 'ALL';
       const types = sectorData.indicatorTypes[catVal] || [];
       if (subIndicatorSelect) {
         subIndicatorSelect.innerHTML = `<option value="ALL">Sous-Indicateur: Tous</option>` + types.map(tp => `
           <option value="${tp}">${t.subIndicators[tp] || tp}</option>
         `).join('');
       }
+      refreshEvaluationsFeed();
+    });
+  }
+
+  // Sub-Indicator Change -> Refreshes feed
+  if (subIndicatorSelect) {
+    subIndicatorSelect.addEventListener('change', () => {
+      appState.selectedType = subIndicatorSelect.value;
+      refreshEvaluationsFeed();
     });
   }
 
@@ -1161,10 +1477,15 @@ export function attachAnalyticsEvents(containerEl, appState, onStateChangeCallba
     resetBtn.addEventListener('click', () => {
       appState.selectedCountry = 'TN';
       appState.selectedMacro = 'ALL';
+      appState.selectedMeso = 'ALL';
       appState.selectedPillar = 'ALL';
+      appState.selectedCategory = 'ALL';
+      appState.selectedType = 'ALL';
+      appState.selectedActor = 'ALL';
       appState.selectedRegions = [];
       appState.selectedLocalities = [];
       if (onStateChangeCallback) onStateChangeCallback();
+      else refreshEvaluationsFeed();
     });
   }
 
@@ -1172,26 +1493,6 @@ export function attachAnalyticsEvents(containerEl, appState, onStateChangeCallba
   attachMapEvents(containerEl, (regionId, regionName) => {
     console.log(`Territoire sélectionné: ${regionName} (${regionId})`);
   });
-
-  // ----------- Evaluations feed: actor-aware & country-aware refresh -----------
-  const allEvalsData = (appState.data && appState.data.recentEvaluations) ? appState.data.recentEvaluations : [];
-
-
-  function refreshEvaluationsFeed(actorName) {
-    const feed = document.getElementById('evaluations-feed');
-    if (!feed) return;
-    const selectedCountryCode = appState.selectedCountry || 'TN';
-    const countryEvals = allEvalsData.filter(r => !r.country || r.country === selectedCountryCode);
-    const filtered = actorName === 'ALL'
-      ? countryEvals
-      : countryEvals.filter(r => (r.targetEntity || r.actorName || r.entity) === actorName);
-    if (filtered.length === 0) {
-      feed.innerHTML = `<div style="text-align:center; color:#94A3B8; font-size:12px; padding:20px 0;">Aucune évaluation trouvée pour <strong>${actorName === 'ALL' ? 'ce filtre' : actorName}</strong>.</div>`;
-    } else {
-      feed.innerHTML = filtered.slice(0, 10).map(buildEvalItemHTML).join('');
-      attachLightboxToImages(feed);
-    }
-  }
 
   function renderRadarCharts(actorName) {
     const scores = getRadarScoresFromEvals(actorName, appState);
@@ -1211,13 +1512,12 @@ export function attachAnalyticsEvents(containerEl, appState, onStateChangeCallba
     });
     try {
       initRadarChart('radar-canvas-econ',   'Économique',      ['Investissement', 'Emplois', 'Valeur Ajoutée'], scores.econ,   '#2563EB');
-      initRadarChart('radar-canvas-social', 'Social',          ['Équipements', 'Personnel', 'Programmes'],      scores.social, '#EA5455');
-      initRadarChart('radar-canvas-env',    'Environnemental', ['Pollution', 'Ressources', 'Résilience'],        scores.env,    '#00A859');
+      initRadarChart('radar-canvas-social', 'Social',          ['Infrastructures', 'Personnel', 'Programmes'],   scores.social, '#EA5455');
+      initRadarChart('radar-canvas-env',    'Environnemental', ['Émission de pollution', 'Ressources', 'Résilience'], scores.env, '#00A859');
     } catch (e) {
       console.warn("Radar init warning:", e);
     }
   }
-
 
   // Initialize 3 Spider Radar Charts on page load with multi-step fallback to ensure rendering after layout
   setTimeout(() => renderRadarCharts('ALL'), 50);
@@ -1227,8 +1527,9 @@ export function attachAnalyticsEvents(containerEl, appState, onStateChangeCallba
   const actorSelect = containerEl.querySelector('#filter-actor-select');
   if (actorSelect) {
     actorSelect.addEventListener('change', () => {
+      appState.selectedActor = actorSelect.value;
       renderRadarCharts(actorSelect.value);
-      refreshEvaluationsFeed(actorSelect.value);
+      refreshEvaluationsFeed();
     });
   }
 

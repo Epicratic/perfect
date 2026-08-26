@@ -16,6 +16,36 @@ import { renderOnboardingView, attachOnboardingEvents } from './modules/onboardi
 
 class PerfECTApp {
   constructor() {
+    // ── Purge stale mock/local data from previous versions ───────────────────
+    // evaluations and topActors must come exclusively from Firestore.
+    // Clear any cached values that may have been stored from old mock data.
+    try {
+      const storageKey = "PERFECT_NET_DATABASE_V1";
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        let dirty = false;
+        if (parsed.evaluations && parsed.evaluations.length > 0) {
+          parsed.evaluations = [];
+          dirty = true;
+        }
+        if (parsed.topActors && parsed.topActors.length > 0) {
+          parsed.topActors = [];
+          dirty = true;
+        }
+        if (parsed.recentEvaluations && parsed.recentEvaluations.some(e => e.timeAgo === "À l'instant")) {
+          parsed.recentEvaluations = parsed.recentEvaluations.filter(e => e.timeAgo !== "À l'instant");
+          dirty = true;
+        }
+        if (dirty) {
+          localStorage.setItem(storageKey, JSON.stringify(parsed));
+          console.log("Purged stale mock data from localStorage.");
+        }
+      }
+    } catch (e) {
+      console.warn("Could not purge localStorage:", e);
+    }
+
     // Load initial or persisted state
     this.appState = {
       lang: 'fr',
@@ -248,14 +278,11 @@ class PerfECTApp {
         bodyHTML = renderReportingView(this.appState, translations);
         this.bodyMount.innerHTML = bodyHTML;
         attachReportingEvents(this.bodyMount, this.appState, translations, (newEval) => {
-          // Add evaluation to database / mock store
-          const updatedData = dbStorage.addEvaluation(this.appState.data, newEval);
-          this.appState.data = updatedData;
-          
-          // Save to Cloud Firestore
+          // Save ONLY to Firestore — do NOT call dbStorage.addEvaluation to prevent duplicate records
           const targetCountry = (newEval && newEval.country) ? newEval.country : (this.appState.data.selectedCountry || "Tunisia");
           firestoreSaveEvaluation(newEval).then(evalId => {
             console.log("Evaluation synced to Firestore with ID:", evalId);
+            // Reload canonical list from Firestore (this is the single source of truth)
             return firestoreLoadEvaluations(targetCountry);
           }).then(realEvals => {
             if (realEvals && realEvals.length > 0) {
