@@ -1,7 +1,7 @@
 // Detailed Analytics & Exploration Module (Tableau Détaillé)
 
 import { renderSVGMap, attachMapEvents } from '../components/svgMap.js';
-import { renderRadarChartHTML, initRadarChart } from '../components/radar.js';
+import { renderRadarChartHTML, initRadarChart, initRadarChartMulti } from '../components/radar.js';
 import { locationData } from '../data/locations.js';
 import { sectorData } from '../data/sectors.js';
 import { initialAppData } from '../data/mockData.js';
@@ -142,6 +142,7 @@ export function getFilteredEvaluations(appState) {
   const selectedPillar = appState.selectedPillar || 'ALL';
   const selectedCategory = appState.selectedCategory || 'ALL';
   const selectedType = appState.selectedType || 'ALL';
+  const selectedActors = (appState.selectedActors || []).map(normStr);
   const selectedActor = appState.selectedActor || 'ALL';
   const selectedRegions = (appState.selectedRegions || []).map(normStr);
   const selectedLocalities = (appState.selectedLocalities || []).map(normStr);
@@ -162,8 +163,12 @@ export function getFilteredEvaluations(appState) {
       return false;
     }
 
-    // 2. Actor filter (if chosen)
-    if (selectedActor && selectedActor !== 'ALL') {
+    // 2. Actor filter (if multi-actors or single actor chosen)
+    if (selectedActors.length > 0) {
+      const eActor = normStr(rev.targetEntity || rev.actorName || rev.entity || '');
+      const matchesAny = selectedActors.some(sActor => eActor && (eActor.includes(sActor) || sActor.includes(eActor)));
+      if (!matchesAny) return false;
+    } else if (selectedActor && selectedActor !== 'ALL') {
       const eActor = normStr(rev.targetEntity || rev.actorName || rev.entity || '');
       const sActor = normStr(selectedActor);
       if (!eActor || (!eActor.includes(sActor) && !sActor.includes(eActor))) {
@@ -600,15 +605,26 @@ export function renderAnalyticsView(appState, translations) {
             </select>
           </div>
 
-          <!-- 10. Acteurs Pill -->
-          <div>
-            <select id="filter-actor-select" class="slicer-pill-select">
-              <option value="ALL">Acteurs: Tous</option>
-              ${activeCountryActors.map(actorName => `
-                <option value="${actorName}">${actorName}</option>
-              `).join('')}
-
+          <!-- 10. Acteurs Comparaison (max 3) -->
+          <div id="actor-multi-wrapper">
+            <select id="filter-actor-add" class="slicer-pill-select">
+              <option value="">➕ Ajouter un acteur (max 3)</option>
+              ${activeCountryActors.map(actorName => {
+                const alreadySelected = (appState.selectedActors || []).includes(actorName);
+                return `<option value="${actorName}" ${alreadySelected ? 'disabled' : ''}>${actorName}</option>`;
+              }).join('')}
             </select>
+            <div id="actor-pills-container" style="display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;">
+              ${(appState.selectedActors || []).map((name, idx) => {
+                const styles = ['solid','dashed','dotted'];
+                const styleLabels = ['━━', '╌╌', '···'];
+                return `<span class="actor-pill" data-actor="${name}" style="display:inline-flex;align-items:center;gap:4px;background:#EFF6FF;border:1px solid #BFDBFE;color:#1E40AF;font-size:10px;font-weight:700;padding:3px 8px;border-radius:12px;">
+                  <span style="font-size:9px;opacity:0.7;" title="${styles[idx]}">${styleLabels[idx]}</span>
+                  ${name}
+                  <button class="actor-pill-remove" data-actor="${name}" style="background:none;border:none;color:#1E40AF;cursor:pointer;font-size:11px;padding:0;line-height:1;margin-left:2px;">×</button>
+                </span>`;
+              }).join('')}
+            </div>
           </div>
 
           <!-- 11. Plage de Note Pill -->
@@ -779,7 +795,12 @@ export function renderAnalyticsView(appState, translations) {
       <!-- CARD 5: Analyse Radar par Pilier -->
       <div class="card" style="margin-bottom: 16px;">
         <div class="card-title" style="margin-bottom: 2px;">Analyse Radar</div>
-        <div id="radar-actor-subtitle" style="font-size: 10px; color: #64748B; margin-bottom: 14px;">Tous les acteurs</div>
+        <div id="radar-actor-subtitle" style="font-size: 10px; color: #64748B; margin-bottom: 6px;">Tous les acteurs</div>
+        <div id="radar-stroke-legend" style="display:none;flex-wrap:wrap;gap:8px;margin-bottom:12px;font-size:9.5px;color:#475569;font-weight:600;">
+          <span>━━ Acteur 1 (trait plein)</span>
+          <span>╌╌ Acteur 2 (pointillé)</span>
+          <span>··· Acteur 3 (discontinu)</span>
+        </div>
 
         <div class="radar-charts-grid">
           ${econRadarHTML}
@@ -1482,8 +1503,11 @@ export function attachAnalyticsEvents(containerEl, appState, onStateChangeCallba
       appState.selectedCategory = 'ALL';
       appState.selectedType = 'ALL';
       appState.selectedActor = 'ALL';
+      appState.selectedActors = [];
       appState.selectedRegions = [];
       appState.selectedLocalities = [];
+      rebuildActorPills();
+      renderRadarCharts();
       if (onStateChangeCallback) onStateChangeCallback();
       else refreshEvaluationsFeed();
     });
@@ -1494,41 +1518,126 @@ export function attachAnalyticsEvents(containerEl, appState, onStateChangeCallba
     console.log(`Territoire sélectionné: ${regionName} (${regionId})`);
   });
 
-  function renderRadarCharts(actorName) {
-    const scores = getRadarScoresFromEvals(actorName, appState);
+  function renderRadarCharts() {
+    const selectedActors = appState.selectedActors || [];
     const subtitle = document.getElementById('radar-actor-subtitle');
+    const strokeLegend = document.getElementById('radar-stroke-legend');
+
+    // Update subtitle
     if (subtitle) {
-      subtitle.textContent = actorName === 'ALL' ? 'Tous les acteurs' : actorName;
+      subtitle.textContent = selectedActors.length > 0
+        ? selectedActors.join(' vs ')
+        : 'Tous les acteurs';
     }
-    // Safely destroy existing Chart.js instances by passing Canvas element
+
+    // Show stroke legend only when multiple actors
+    if (strokeLegend) {
+      strokeLegend.style.display = selectedActors.length > 1 ? 'flex' : 'none';
+    }
+
+    // Build datasets
+    let econDatasets, socialDatasets, envDatasets;
+
+    if (selectedActors.length === 0) {
+      // Global view — all actors
+      const scores = getRadarScoresFromEvals('ALL', appState);
+      econDatasets   = [{ label: 'Tous', values: scores.econ }];
+      socialDatasets = [{ label: 'Tous', values: scores.social }];
+      envDatasets    = [{ label: 'Tous', values: scores.env }];
+    } else {
+      econDatasets   = [];
+      socialDatasets = [];
+      envDatasets    = [];
+      selectedActors.forEach(actorName => {
+        const scores = getRadarScoresFromEvals(actorName, appState);
+        econDatasets.push(  { label: actorName, values: scores.econ });
+        socialDatasets.push({ label: actorName, values: scores.social });
+        envDatasets.push(   { label: actorName, values: scores.env });
+      });
+    }
+
+    // Destroy existing charts
     ['radar-canvas-econ', 'radar-canvas-social', 'radar-canvas-env'].forEach(id => {
       const canvasEl = document.getElementById(id);
       if (canvasEl && window.Chart && window.Chart.getChart) {
-        try {
-          const existing = window.Chart.getChart(canvasEl);
-          if (existing) existing.destroy();
-        } catch (e) {}
+        try { const e = window.Chart.getChart(canvasEl); if (e) e.destroy(); } catch (_) {}
       }
     });
+
     try {
-      initRadarChart('radar-canvas-econ',   'Économique',      ['Investissement', 'Emplois', 'Valeur Ajoutée'], scores.econ,   '#2563EB');
-      initRadarChart('radar-canvas-social', 'Social',          ['Infrastructures', 'Personnel', 'Programmes'],   scores.social, '#EA5455');
-      initRadarChart('radar-canvas-env',    'Environnemental', ['Émission de pollution', 'Ressources', 'Résilience'], scores.env, '#00A859');
+      initRadarChartMulti('radar-canvas-econ',   'Économique',      ['Investissement', 'Emplois', 'Valeur Ajoutée'],          econDatasets,   '#2563EB');
+      initRadarChartMulti('radar-canvas-social', 'Social',          ['Infrastructures', 'Personnel', 'Programmes'],            socialDatasets, '#EA5455');
+      initRadarChartMulti('radar-canvas-env',    'Environnemental', ['Émission de pollution', 'Ressources', 'Résilience'],     envDatasets,    '#00A859');
     } catch (e) {
-      console.warn("Radar init warning:", e);
+      console.warn('Radar init warning:', e);
     }
   }
 
-  // Initialize 3 Spider Radar Charts on page load with multi-step fallback to ensure rendering after layout
-  setTimeout(() => renderRadarCharts('ALL'), 50);
-  setTimeout(() => renderRadarCharts('ALL'), 300);
+  // Initialize radar charts and actor pills on page load
+  rebuildActorPills();
+  setTimeout(() => renderRadarCharts(), 50);
+  setTimeout(() => renderRadarCharts(), 300);
 
-  // Actor filter -> re-draw radar charts AND refresh evaluations feed
-  const actorSelect = containerEl.querySelector('#filter-actor-select');
-  if (actorSelect) {
-    actorSelect.addEventListener('change', () => {
-      appState.selectedActor = actorSelect.value;
-      renderRadarCharts(actorSelect.value);
+  // Helper: rebuild actor pills container DOM
+  function rebuildActorPills() {
+    const container = containerEl.querySelector('#actor-pills-container');
+    const addSelect = containerEl.querySelector('#filter-actor-add');
+    if (!container) return;
+
+    const selectedActors = appState.selectedActors || [];
+    const styleLabels = ['━━', '╌╌', '···'];
+    const styles = ['solid', 'dashed', 'dotted'];
+
+    container.innerHTML = selectedActors.map((name, idx) => `
+      <span class="actor-pill" data-actor="${name}"
+        style="display:inline-flex;align-items:center;gap:4px;background:#EFF6FF;border:1px solid #BFDBFE;color:#1E40AF;font-size:10px;font-weight:700;padding:3px 8px;border-radius:12px;">
+        <span style="font-size:9px;opacity:0.7;" title="${styles[idx]}">${styleLabels[idx]}</span>
+        ${name}
+        <button class="actor-pill-remove" data-actor="${name}"
+          style="background:none;border:none;color:#1E40AF;cursor:pointer;font-size:11px;padding:0;line-height:1;margin-left:2px;">×</button>
+      </span>
+    `).join('');
+
+    // Rebind remove buttons
+    container.querySelectorAll('.actor-pill-remove').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const actorName = btn.dataset.actor;
+        appState.selectedActors = (appState.selectedActors || []).filter(a => a !== actorName);
+        // Re-enable option in dropdown
+        if (addSelect) {
+          const opt = addSelect.querySelector(`option[value="${actorName}"]`);
+          if (opt) opt.disabled = false;
+        }
+        rebuildActorPills();
+        renderRadarCharts();
+        refreshEvaluationsFeed();
+      });
+    });
+
+    // Update add select: reset to placeholder, disable limit if 3 reached
+    if (addSelect) {
+      addSelect.value = '';
+      addSelect.disabled = selectedActors.length >= 3;
+      addSelect.options[0].textContent = selectedActors.length >= 3
+        ? '✓ Maximum 3 acteurs atteint'
+        : '➕ Ajouter un acteur (max 3)';
+    }
+  }
+
+  // Actor add dropdown
+  const actorAddSelect = containerEl.querySelector('#filter-actor-add');
+  if (actorAddSelect) {
+    actorAddSelect.addEventListener('change', () => {
+      const actorName = actorAddSelect.value;
+      if (!actorName) return;
+      const selectedActors = appState.selectedActors || [];
+      if (selectedActors.length >= 3 || selectedActors.includes(actorName)) return;
+      appState.selectedActors = [...selectedActors, actorName];
+      // Disable option in dropdown
+      const opt = actorAddSelect.querySelector(`option[value="${actorName}"]`);
+      if (opt) opt.disabled = true;
+      rebuildActorPills();
+      renderRadarCharts();
       refreshEvaluationsFeed();
     });
   }
