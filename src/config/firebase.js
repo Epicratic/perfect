@@ -23,7 +23,7 @@ async function getFirebaseModules() {
     const { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
             sendEmailVerification, onAuthStateChanged, signOut } =
       await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js');
-    const { getFirestore, doc, getDoc, setDoc, updateDoc, addDoc, collection, getDocs, serverTimestamp } =
+    const { getFirestore, doc, getDoc, setDoc, updateDoc, addDoc, collection, getDocs, query, where, serverTimestamp } =
       await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
 
     _app = initializeApp(firebaseConfig);
@@ -43,6 +43,8 @@ async function getFirebaseModules() {
     _db._addDoc = addDoc;
     _db._collection = collection;
     _db._getDocs = getDocs;
+    _db._query = query;
+    _db._where = where;
     _db._serverTimestamp = serverTimestamp;
 
     return { app: _app, auth: _auth, db: _db };
@@ -202,9 +204,9 @@ export async function firestoreLoadEvaluations(country) {
   if (!modules) return [];
   const { db } = modules;
   try {
-    const { getDocs, query } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
-    const q = query(db._collection(db, "evaluations"));
-    const snapshot = await getDocs(q);
+    const q = (db._query && db._collection) ? db._query(db._collection(db, "evaluations")) : (db._collection ? db._collection(db, "evaluations") : null);
+    if (!q || !db._getDocs) return [];
+    const snapshot = await db._getDocs(q);
     const evals = [];
     snapshot.forEach(docSnap => {
       const d = docSnap.data();
@@ -280,10 +282,10 @@ export async function firestoreLoadUserEvaluations(userEmail, userName = '') {
   const { db } = modules;
   if (!userEmail) return [];
   try {
-    const { getDocs, query, where } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+    if (!db._query || !db._collection || !db._where || !db._getDocs) return [];
     // Strictly filter by authorEmail so new users with 0 ratings see an empty history
-    const q = query(db._collection(db, "evaluations"), where('authorEmail', '==', userEmail));
-    const snapshot = await getDocs(q);
+    const q = db._query(db._collection(db, "evaluations"), db._where('authorEmail', '==', userEmail));
+    const snapshot = await db._getDocs(q);
     const evals = [];
 
     snapshot.forEach(docSnap => {
@@ -441,8 +443,8 @@ export async function firestoreLoadAllUsers() {
   if (!modules) return [];
   const { db } = modules;
   try {
-    const { getDocs } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
-    const snapshot = await getDocs(db._collection(db, 'users'));
+    if (!db._collection || !db._getDocs) return [];
+    const snapshot = await db._getDocs(db._collection(db, 'users'));
     const users = [];
     snapshot.forEach(docSnap => {
       const d = docSnap.data();
@@ -488,26 +490,27 @@ export async function firestoreLoadUserConversations(userEmail) {
   if (modules) {
     const { db } = modules;
     try {
-      const { getDocs, query, where } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
-      const qClient = query(db._collection(db, "conversations"), where('clientEmail', '==', userEmail));
-      const qEnt = query(db._collection(db, "conversations"), where('enterpriseEmail', '==', userEmail));
-      const [snapClient, snapEnt] = await Promise.all([
-        getDocs(qClient).catch(() => null),
-        getDocs(qEnt).catch(() => null)
-      ]);
-      
-      const convMap = new Map();
-      const addSnap = (snap) => {
-        if (snap) {
-          snap.forEach(docSnap => {
-            const d = docSnap.data();
-            convMap.set(docSnap.id, { id: docSnap.id, ...d });
-          });
-        }
-      };
-      addSnap(snapClient);
-      addSnap(snapEnt);
-      firestoreConvs = Array.from(convMap.values());
+      if (db._query && db._where && db._getDocs && db._collection) {
+        const qClient = db._query(db._collection(db, "conversations"), db._where('clientEmail', '==', userEmail));
+        const qEnt = db._query(db._collection(db, "conversations"), db._where('enterpriseEmail', '==', userEmail));
+        const [snapClient, snapEnt] = await Promise.all([
+          db._getDocs(qClient).catch(() => null),
+          db._getDocs(qEnt).catch(() => null)
+        ]);
+        
+        const convMap = new Map();
+        const addSnap = (snap) => {
+          if (snap) {
+            snap.forEach(docSnap => {
+              const d = docSnap.data();
+              convMap.set(docSnap.id, { id: docSnap.id, ...d });
+            });
+          }
+        };
+        addSnap(snapClient);
+        addSnap(snapEnt);
+        firestoreConvs = Array.from(convMap.values());
+      }
     } catch (e) {
       console.warn("Firestore load conversations error, using local storage cache:", e);
     }
@@ -531,6 +534,9 @@ export async function firestoreLoadUserConversations(userEmail) {
   });
 
   const list = Array.from(mergedMap.values()).sort((a, b) => (b.lastUpdatedSeconds || 0) - (a.lastUpdatedSeconds || 0));
+  try {
+    localStorage.setItem("PERFECT_CONVERSATIONS_V1", JSON.stringify(list));
+  } catch (e) {}
   return list;
 }
 
@@ -591,14 +597,16 @@ export async function firestoreSendMessage({ evalId, enterpriseName, enterpriseE
   }
   localStorage.setItem("PERFECT_CONVERSATIONS_V1", JSON.stringify(localConvs));
 
-  // 2. Sync to Firestore
+  // 2. Sync to Firestore collection 'conversations'
   const modules = await getFirebaseModules();
   if (modules) {
     const { db } = modules;
     try {
-      const { doc, setDoc } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
-      const docRef = doc(db, "conversations", convId);
-      await setDoc(docRef, existing, { merge: true });
+      if (db._doc && db._setDoc) {
+        const docRef = db._doc(db, "conversations", convId);
+        await db._setDoc(docRef, existing, { merge: true });
+        console.log("Conversation saved to Firestore collection 'conversations':", convId);
+      }
     } catch (e) {
       console.warn("Firestore save conversation error (offline fallback active):", e);
     }
@@ -628,12 +636,13 @@ export async function firestoreMarkConversationRead(convId, userRole) {
   if (modules) {
     const { db } = modules;
     try {
-      const { doc, setDoc } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
-      const docRef = doc(db, "conversations", convId);
-      const updateData = {};
-      if (userRole === 'contributeur') updateData.unreadForClient = false;
-      if (userRole === 'entreprise') updateData.unreadForEnterprise = false;
-      await setDoc(docRef, updateData, { merge: true });
+      if (db._doc && db._setDoc) {
+        const docRef = db._doc(db, "conversations", convId);
+        const updateData = {};
+        if (userRole === 'contributeur') updateData.unreadForClient = false;
+        if (userRole === 'entreprise') updateData.unreadForEnterprise = false;
+        await db._setDoc(docRef, updateData, { merge: true });
+      }
     } catch (e) {}
   }
 }
@@ -665,10 +674,11 @@ export async function firestoreSaveWorkshopRequest(requestData) {
   if (modules) {
     const { db } = modules;
     try {
-      const { doc, setDoc } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
-      const docRef = doc(db, "workshop_requests", reqId);
-      await setDoc(docRef, fullReq, { merge: true });
-      console.log('Workshop request saved to Firestore successfully:', reqId);
+      if (db._doc && db._setDoc) {
+        const docRef = db._doc(db, "workshop_requests", reqId);
+        await db._setDoc(docRef, fullReq, { merge: true });
+        console.log('Workshop request saved to Firestore successfully:', reqId);
+      }
     } catch (e) {
       console.warn('Firestore workshop request save failed, stored locally:', e);
     }
@@ -685,12 +695,13 @@ export async function firestoreLoadWorkshopRequests() {
   if (modules) {
     const { db } = modules;
     try {
-      const { getDocs } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
-      const snapshot = await getDocs(db._collection(db, "workshop_requests"));
-      snapshot.forEach(docSnap => {
-        const d = docSnap.data();
-        firestoreReqs.push({ id: docSnap.id, ...d });
-      });
+      if (db._collection && db._getDocs) {
+        const snapshot = await db._getDocs(db._collection(db, "workshop_requests"));
+        snapshot.forEach(docSnap => {
+          const d = docSnap.data();
+          firestoreReqs.push({ id: docSnap.id, ...d });
+        });
+      }
     } catch (e) {
       console.warn('Firestore load workshop requests error:', e);
     }
@@ -730,9 +741,10 @@ export async function firestoreUpdateWorkshopRequestStatus(requestId, newStatus)
   if (modules) {
     const { db } = modules;
     try {
-      const { doc, setDoc } = await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
-      const docRef = doc(db, "workshop_requests", requestId);
-      await setDoc(docRef, { status: newStatus }, { merge: true });
+      if (db._doc && db._setDoc) {
+        const docRef = db._doc(db, "workshop_requests", requestId);
+        await db._setDoc(docRef, { status: newStatus }, { merge: true });
+      }
     } catch (e) {
       console.warn('Firestore update workshop status failed:', e);
     }

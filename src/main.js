@@ -2,7 +2,7 @@
 
 import { translations } from './data/translations.js';
 import { initialAppData } from './data/mockData.js';
-import { dbStorage, firestoreSaveEvaluation, firestoreLoadEvaluations, firestoreLoadUserEvaluations, firestoreLoadAllUsers, firestoreLoadWorkshopRequests, firestoreUpdateWorkshopRequestStatus, firestoreGetUserProfile, firestoreUpdateUserProfile } from './config/firebase.js';
+import { dbStorage, firestoreSaveEvaluation, firestoreLoadEvaluations, firestoreLoadUserEvaluations, firestoreLoadAllUsers, firestoreLoadUserConversations, firestoreLoadWorkshopRequests, firestoreUpdateWorkshopRequestStatus, firestoreGetUserProfile, firestoreUpdateUserProfile } from './config/firebase.js';
 
 import { renderHeaderHTML, renderBottomNavHTML, attachHeaderMenuEvents } from './components/nav.js';
 import { renderAuthView, attachAuthEvents } from './modules/auth.js';
@@ -183,13 +183,14 @@ class PerfECTApp {
               }
             }
 
-            // Load real evaluations from Firestore and replace mock data
+            // Load real evaluations and conversations from Firestore and replace mock data
             const userEmail = this.appState.currentUser && this.appState.currentUser.email;
             const selectedCountry = (this.appState.data && this.appState.data.selectedCountry) || 'Tunisia';
 
             Promise.all([
               firestoreLoadEvaluations(selectedCountry),
-              userEmail ? firestoreLoadUserEvaluations(userEmail) : Promise.resolve([])
+              userEmail ? firestoreLoadUserEvaluations(userEmail) : Promise.resolve([]),
+              userEmail ? firestoreLoadUserConversations(userEmail).catch(() => []) : Promise.resolve([])
             ]).then(([countryEvals, userEvals]) => {
               if (countryEvals && countryEvals.length > 0) {
                 this.appState.data.recentEvaluations = countryEvals;
@@ -377,6 +378,7 @@ class PerfECTApp {
               this.appState.currentUserEvals = userEvals;
             }
           }).catch(() => {}));
+          promises.push(firestoreLoadUserConversations(profileUserEmail).catch(() => []));
         }
         if (profileUserId) {
           promises.push(firestoreGetUserProfile(profileUserId).then(freshProfile => {
