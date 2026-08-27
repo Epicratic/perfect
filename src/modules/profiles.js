@@ -468,9 +468,25 @@ export function renderProfilesView(appState, translations) {
               ${item.authorInitials || 'U'}
             </div>
             <div style="flex: 1;">
-              <div style="font-size: 12px; font-weight: 700; color: #002B49;">
-                ${item.authorName || 'Contributeur'} <span style="font-weight: 400; color: #64748B;">a noté</span>
-                <span style="color: #00A859; font-weight: 800;">${item.targetEntity || 'Acteur'}</span>
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                <div style="font-size: 12px; font-weight: 700; color: #002B49;">
+                  ${item.authorName || 'Contributeur'} <span style="font-weight: 400; color: #64748B;">a noté</span>
+                  <span style="color: #00A859; font-weight: 800;">${item.targetEntity || 'Acteur'}</span>
+                </div>
+                <button class="btn-share-facebook"
+                  data-actor="${(item.targetEntity || '').replace(/"/g, '&quot;')}"
+                  data-rating="${ratingNum.toFixed(1)}"
+                  data-stars="${starsStr}"
+                  data-comment="${(item.comment || '').replace(/"/g, '&quot;')}"
+                  data-location="${(item.location || 'Tunisie').replace(/"/g, '&quot;')}"
+                  data-sector="${(sectorLabel || '').replace(/"/g, '&quot;')}"
+                  title="Partager cette évaluation sur Facebook"
+                  style="background: #1877F2; color: #FFFFFF; border: none; border-radius: 6px; padding: 3px 8px; font-size: 9.5px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; flex-shrink: 0; box-shadow: 0 1px 3px rgba(24, 119, 242, 0.3); transition: all 0.15s ease;">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="#FFFFFF" style="flex-shrink: 0;">
+                    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                  </svg>
+                  <span>Partager</span>
+                </button>
               </div>
 
               <!-- Sector & Sub-sector, Performance & Indicator Badges -->
@@ -1194,6 +1210,55 @@ export function attachProfilesEvents(containerEl, appState, renderCallback, onEx
   const filterEntIndicator = containerEl.querySelector('#filter-ent-indicator');
   if (filterEntPillar) filterEntPillar.addEventListener('change', applyHistoryFilters);
   if (filterEntIndicator) filterEntIndicator.addEventListener('change', applyHistoryFilters);
+
+  // --- Facebook Share button for ratings in history ---
+  const fbShareBtns = containerEl.querySelectorAll('.btn-share-facebook');
+  fbShareBtns.forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const actor = btn.getAttribute('data-actor') || 'Établissement';
+      const rating = btn.getAttribute('data-rating') || '5.0';
+      const stars = btn.getAttribute('data-stars') || '★★★★★';
+      const comment = btn.getAttribute('data-comment') || '';
+      const location = btn.getAttribute('data-location') || 'Tunisie';
+      const sector = btn.getAttribute('data-sector') || '';
+
+      const shareText = `⭐ J'ai évalué "${actor}" sur l'application PerfECT !\nNote : ${rating}/5 ${stars}\n${sector ? '🏛️ Secteur : ' + sector + '\n' : ''}📍 Localisation : ${location}\n${comment ? '💬 "' + comment + '"\n' : ''}\nSuivez et évaluez la qualité des services sur PerfECT ! 🇹🇳\n#PerfECT #EvaluationCitoyenne #Transparence\n📲 Téléchargez PerfECT ici : https://tinyurl.com/perfect-tn`;
+      const appUrl = 'https://perfect-net.firebaseapp.com';
+
+      // Copy text to clipboard for user convenience
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(shareText);
+        }
+      } catch (err) {}
+
+      // Try native Web Share API (opens native Facebook / share sheet on mobile)
+      if (navigator.share) {
+        try {
+          await navigator.share({
+            title: `Mon évaluation PerfECT — ${actor}`,
+            text: shareText,
+            url: appUrl
+          });
+          return;
+        } catch (shareErr) {
+          // Fallback to direct Facebook sharer URL if user cancelled or not supported
+        }
+      }
+
+      // Direct Facebook Sharer URL fallback
+      const fbUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(appUrl)}&quote=${encodeURIComponent(shareText)}`;
+      window.open(fbUrl, '_blank', 'width=620,height=580');
+
+      // Toast feedback
+      const toast = document.createElement('div');
+      toast.style.cssText = `position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1877F2;color:white;padding:12px 20px;border-radius:14px;font-size:12px;font-weight:700;z-index:99999;box-shadow:0 4px 20px rgba(0,0,0,0.3);animation:fadeIn 0.3s ease;`;
+      toast.textContent = '📘 Ouverture de Facebook... Texte copié dans le presse-papier !';
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 4000);
+    });
+  });
 
   // --- Avatar click & Change Photo button -> file upload ---
   const avatarWrapper = containerEl.querySelector('#profile-avatar-wrapper');
