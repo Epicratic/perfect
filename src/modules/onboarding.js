@@ -1,11 +1,12 @@
 // Onboarding Module for Business Accounts
 import { locationData } from '../data/locations.js';
 import { sectorData } from '../data/sectors.js';
+import { translations as allTranslations } from '../data/translations.js';
 import { firestoreUpdateUserProfile } from '../config/firebase.js';
 
-export function renderOnboardingView(appState, translations) {
+export function renderOnboardingView(appState = {}, translations = allTranslations) {
   const lang = appState.lang || 'fr';
-  const t = translations[lang] || translations.fr;
+  const t = (translations && translations[lang]) ? translations[lang] : (allTranslations[lang] || allTranslations.fr);
   const user = appState.currentUser || {};
 
   const countryOptionsHTML = locationData.map(c => `
@@ -13,7 +14,7 @@ export function renderOnboardingView(appState, translations) {
   `).join('');
 
   const macroSectorsHTML = sectorData.macroSectors.map(ms => `
-    <option value="${ms}">${t.sectors[ms] || ms}</option>
+    <option value="${ms}">${(t.sectors && t.sectors[ms]) || ms}</option>
   `).join('');
 
   return `
@@ -38,7 +39,7 @@ export function renderOnboardingView(appState, translations) {
 
           <!-- 2. Country -->
           <div class="form-group" style="margin-bottom: 14px;">
-            <label class="form-label">${t.countryLabel} *</label>
+            <label class="form-label">${t.countryLabel || 'Pays'} *</label>
             <select id="onb-country" class="form-control" required>
               ${countryOptionsHTML}
             </select>
@@ -46,34 +47,34 @@ export function renderOnboardingView(appState, translations) {
 
           <!-- 3. Region / Governorate -->
           <div class="form-group" style="margin-bottom: 14px;">
-            <label class="form-label">${t.regionLabel} *</label>
+            <label class="form-label">${t.regionLabel || 'Région / Gouvernorat'} *</label>
             <select id="onb-region" class="form-control" required>
-              <option value="">${t.selectRegion}</option>
+              <option value="">${t.selectRegion || '-- Sélectionner une Région --'}</option>
             </select>
           </div>
 
           <!-- 4. Delegation / Locality -->
           <div class="form-group" style="margin-bottom: 14px;">
-            <label class="form-label">${t.localitiesLabel} *</label>
+            <label class="form-label">${t.localitiesLabel || 'Localité / Délégation'} *</label>
             <select id="onb-locality" class="form-control" required disabled>
-              <option value="">${t.selectLocality}</option>
+              <option value="">${t.selectLocality || '-- Sélectionner une Localité --'}</option>
             </select>
           </div>
 
           <!-- 5. Macro Sector -->
           <div class="form-group" style="margin-bottom: 14px;">
-            <label class="form-label">${t.macroSectorLabel} *</label>
+            <label class="form-label">${t.macroSectorLabel || 'Macro-Secteur'} *</label>
             <select id="onb-macro-sector" class="form-control" required>
-              <option value="">${t.selectMacroSector}</option>
+              <option value="">${t.selectMacroSector || '-- Sélectionner un Macro-Secteur --'}</option>
               ${macroSectorsHTML}
             </select>
           </div>
 
           <!-- 6. Meso Sector -->
           <div class="form-group" style="margin-bottom: 20px;">
-            <label class="form-label">${t.mesoSectorLabel} *</label>
+            <label class="form-label">${t.mesoSectorLabel || 'Méso-Secteur'} *</label>
             <select id="onb-meso-sector" class="form-control" required disabled>
-              <option value="">${t.selectMesoSector}</option>
+              <option value="">${t.selectMesoSector || '-- Sélectionner un Méso-Secteur --'}</option>
             </select>
           </div>
 
@@ -86,9 +87,25 @@ export function renderOnboardingView(appState, translations) {
   `;
 }
 
-export function attachOnboardingEvents(containerEl, appState, translations, onCompleteCallback) {
+export function attachOnboardingEvents(containerEl, appStateOrCb, translationsOrCb, onCompleteCallback) {
+  let appState = {};
+  let translations = allTranslations;
+  let onDone = null;
+
+  if (typeof appStateOrCb === 'function') {
+    onDone = appStateOrCb;
+  } else {
+    appState = appStateOrCb || {};
+    if (typeof translationsOrCb === 'function') {
+      onDone = translationsOrCb;
+    } else {
+      translations = translationsOrCb || allTranslations;
+      onDone = onCompleteCallback;
+    }
+  }
+
   const lang = appState.lang || 'fr';
-  const t = translations[lang] || translations.fr;
+  const t = (translations && translations[lang]) ? translations[lang] : (allTranslations[lang] || allTranslations.fr);
 
   const countrySelect = containerEl.querySelector('#onb-country');
   const regionSelect = containerEl.querySelector('#onb-region');
@@ -97,22 +114,26 @@ export function attachOnboardingEvents(containerEl, appState, translations, onCo
   const mesoSelect = containerEl.querySelector('#onb-meso-sector');
   const form = containerEl.querySelector('#onboarding-form');
 
-  let currentCountryObj = locationData.find(c => c.code === 'TN') || locationData[0];
+  if (!countrySelect || !regionSelect || !localitySelect || !macroSelect || !mesoSelect || !form) {
+    return;
+  }
+
+  let currentCountryObj = locationData.find(c => c.code === (countrySelect.value || 'TN')) || locationData[0];
 
   function updateRegions() {
-    const code = countrySelect.value;
-    currentCountryObj = locationData.find(c => c.code === code);
+    const code = countrySelect.value || 'TN';
+    currentCountryObj = locationData.find(c => c.code === code) || locationData[0];
     localitySelect.disabled = true;
-    localitySelect.innerHTML = `<option value="">${t.selectLocality}</option>`;
+    localitySelect.innerHTML = `<option value="">${t.selectLocality || '-- Sélectionner une Localité --'}</option>`;
 
-    if (currentCountryObj && currentCountryObj.regions) {
+    if (currentCountryObj && currentCountryObj.regions && currentCountryObj.regions.length > 0) {
       regionSelect.disabled = false;
-      regionSelect.innerHTML = `<option value="">${t.selectRegion}</option>` + currentCountryObj.regions.map(r => `
-        <option value="${r.id}">${r.names[lang] || r.names.fr}</option>
+      regionSelect.innerHTML = `<option value="">${t.selectRegion || '-- Sélectionner une Région --'}</option>` + currentCountryObj.regions.map(r => `
+        <option value="${r.id}">${(r.names && (r.names[lang] || r.names.fr)) || r.id}</option>
       `).join('');
     } else {
       regionSelect.disabled = true;
-      regionSelect.innerHTML = `<option value="">${t.selectRegion}</option>`;
+      regionSelect.innerHTML = `<option value="">${t.selectRegion || '-- Sélectionner une Région --'}</option>`;
     }
   }
 
@@ -127,38 +148,40 @@ export function attachOnboardingEvents(containerEl, appState, translations, onCo
       const regionObj = currentCountryObj.regions.find(r => r.id === regionId);
       if (regionObj && regionObj.localities && regionObj.localities.length > 0) {
         localitySelect.disabled = false;
-        localitySelect.innerHTML = `<option value="">${t.selectLocality}</option>` + regionObj.localities.map(loc => `
+        localitySelect.innerHTML = `<option value="">${t.selectLocality || '-- Sélectionner une Localité --'}</option>` + regionObj.localities.map(loc => `
           <option value="${loc}">${loc}</option>
         `).join('');
       } else {
         localitySelect.disabled = true;
-        localitySelect.innerHTML = `<option value="">${t.selectLocality}</option>`;
+        localitySelect.innerHTML = `<option value="">${t.selectLocality || '-- Sélectionner une Localité --'}</option>`;
       }
     }
   });
 
   macroSelect.addEventListener('change', () => {
     const macroVal = macroSelect.value;
-    const mesos = sectorData.mesoSectors[macroVal] || [];
+    const mesos = (sectorData.mesoSectors && sectorData.mesoSectors[macroVal]) || [];
     if (mesos.length > 0) {
       mesoSelect.disabled = false;
-      mesoSelect.innerHTML = `<option value="">${t.selectMesoSector}</option>` + mesos.map(m => `
-        <option value="${m.id}">${m.names[lang] || m.names.fr || m.id}</option>
+      mesoSelect.innerHTML = `<option value="">${t.selectMesoSector || '-- Sélectionner un Méso-Secteur --'}</option>` + mesos.map(m => `
+        <option value="${m.id}">${(m.names && (m.names[lang] || m.names.fr)) || m.id}</option>
       `).join('');
     } else {
       mesoSelect.disabled = true;
-      mesoSelect.innerHTML = `<option value="">${t.selectMesoSector}</option>`;
+      mesoSelect.innerHTML = `<option value="">${t.selectMesoSector || '-- Sélectionner un Méso-Secteur --'}</option>`;
     }
   });
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = containerEl.querySelector('#onb-submit-btn');
-    btn.disabled = true;
-    btn.textContent = "Enregistrement...";
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Enregistrement...";
+    }
 
     const businessProfile = {
-      actorName: containerEl.querySelector('#onb-name').value.trim(),
+      actorName: (containerEl.querySelector('#onb-name') ? containerEl.querySelector('#onb-name').value : '').trim(),
       country: countrySelect.value,
       region: regionSelect.value,
       locality: localitySelect.value,
@@ -172,12 +195,17 @@ export function attachOnboardingEvents(containerEl, appState, translations, onCo
 
     const uid = appState.currentUser.uid || appState.currentUser.id;
     if (uid) {
-      await firestoreUpdateUserProfile(uid, {
-        businessProfile: businessProfile,
-        onboardingComplete: true
-      });
+      try {
+        await firestoreUpdateUserProfile(uid, {
+          businessProfile: businessProfile,
+          onboardingComplete: true
+        });
+      } catch (err) {
+        console.warn("Error updating user profile in Firestore:", err);
+      }
     }
 
-    if (onCompleteCallback) onCompleteCallback();
+    if (onDone) onDone(appState.currentUser);
   });
 }
+

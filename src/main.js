@@ -546,8 +546,8 @@ class PerfECTApp {
       case 'onboarding':
         bodyHTML = renderOnboardingView(this.appState, translations);
         this.bodyMount.innerHTML = bodyHTML;
-        attachOnboardingEvents(this.bodyMount, (updatedUser) => {
-          this.appState.currentUser = updatedUser;
+        attachOnboardingEvents(this.bodyMount, this.appState, translations, (updatedUser) => {
+          if (updatedUser) this.appState.currentUser = updatedUser;
           this.navigateTo('dashboard');
         });
         break;
