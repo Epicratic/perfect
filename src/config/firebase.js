@@ -23,7 +23,7 @@ async function getFirebaseModules() {
     const { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
             sendEmailVerification, onAuthStateChanged, signOut } =
       await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js');
-    const { getFirestore, doc, getDoc, setDoc, addDoc, collection, serverTimestamp } =
+    const { getFirestore, doc, getDoc, setDoc, updateDoc, addDoc, collection, getDocs, serverTimestamp } =
       await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
 
     _app = initializeApp(firebaseConfig);
@@ -39,8 +39,10 @@ async function getFirebaseModules() {
     _db._doc = doc;
     _db._getDoc = getDoc;
     _db._setDoc = setDoc;
+    _db._updateDoc = updateDoc;
     _db._addDoc = addDoc;
     _db._collection = collection;
+    _db._getDocs = getDocs;
     _db._serverTimestamp = serverTimestamp;
 
     return { app: _app, auth: _auth, db: _db };
@@ -49,6 +51,7 @@ async function getFirebaseModules() {
     return null;
   }
 }
+
 
 // ── Firebase Auth helpers ─────────────────────────────────────────────────────
 
@@ -251,10 +254,12 @@ export async function firestoreLoadEvaluations(country) {
         createdAtSeconds: createdAtSeconds,
         authorEmail: d.authorEmail || d.email || '',
         isTerritoryRating: d.isTerritoryRating || false,
-        isExpertRating: d.isExpertRating || false,
         attachmentName: d.attachmentName || null,
         attachmentBase64: d.attachmentBase64 || d.photoUrl || null,
-        photoUrl: d.photoUrl || d.attachmentBase64 || null
+        photoUrl: d.photoUrl || d.attachmentBase64 || null,
+        workflowStep: parseInt(d.workflowStep || d.step || 0),
+        workflowUpdatedBy: d.workflowUpdatedBy || '',
+        workflowUpdatedAt: d.workflowUpdatedAt || null
       });
     });
     console.log(`Loaded ${evals.length} total evaluations from Firestore.`);
@@ -334,7 +339,10 @@ export async function firestoreLoadUserEvaluations(userEmail, userName = '') {
         isExpertRating: d.isExpertRating || false,
         attachmentName: d.attachmentName || null,
         attachmentBase64: d.attachmentBase64 || d.photoUrl || null,
-        photoUrl: d.photoUrl || d.attachmentBase64 || null
+        photoUrl: d.photoUrl || d.attachmentBase64 || null,
+        workflowStep: parseInt(d.workflowStep || d.step || 0),
+        workflowUpdatedBy: d.workflowUpdatedBy || '',
+        workflowUpdatedAt: d.workflowUpdatedAt || null
       });
     });
     console.log(`Loaded ${evals.length} evaluations for ${userEmail} from Firestore.`);
@@ -344,6 +352,85 @@ export async function firestoreLoadUserEvaluations(userEmail, userName = '') {
     return [];
   }
 }
+
+/**
+ * Update workflow stage (1-5, or 0) for an evaluation.
+ * Uses only pre-cached Firebase functions (no secondary dynamic imports).
+ */
+export async function firestoreUpdateEvaluationWorkflow(evalId, workflowStep, updaterEmail = '', targetEntity = '', clientName = '') {
+  const stepNum = parseInt(workflowStep) || 0;
+  const modules = await getFirebaseModules();
+  if (!modules) { console.warn('[WF] Firebase modules not available'); return false; }
+  const { db } = modules;
+
+  if (!db._setDoc || !db._doc || !db._getDocs || !db._collection) {
+    console.warn('[WF] Required Firestore functions not cached on db');
+    return false;
+  }
+
+  const updateData = {
+    workflowStep: stepNum,
+    workflowUpdatedBy: updaterEmail || '',
+    workflowUpdatedAt: new Date().toISOString()
+  };
+
+  let updated = false;
+
+  // ── Step 1: Direct update by evalId (if it's a real Firestore doc ID) ──
+  const isSyntheticId = !evalId || evalId.startsWith('ent-eval-') || evalId.startsWith('uh-') || evalId.startsWith('eval-');
+  if (!isSyntheticId) {
+    try {
+      const docRef = db._doc(db, 'evaluations', evalId);
+      await db._setDoc(docRef, updateData, { merge: true });
+      console.log(`[WF] Direct setDoc OK → doc ${evalId} workflowStep=${stepNum}`);
+      updated = true;
+    } catch (err) {
+      console.warn(`[WF] Direct setDoc failed for ${evalId}:`, String(err));
+    }
+  }
+
+  // ── Step 2: Fallback – scan collection and match by entity/author ──
+  // This handles cases where evalId is synthetic or direct update failed.
+  try {
+    const norm = (s) => !s ? '' : String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
+    const tNorm = norm(targetEntity);
+    const cNorm = norm(clientName);
+
+    const colRef = db._collection(db, 'evaluations');
+    const snapshot = await db._getDocs(colRef);
+
+    const updatePromises = [];
+    snapshot.forEach(docSnap => {
+      const d = docSnap.data();
+      const dTarget = norm(d.targetEntity || d.actorName || d.entity || '');
+      const dAuthor = norm(d.authorName || d.author || '');
+
+      const isExactId = docSnap.id === evalId;
+      const isEntityMatch = tNorm && dTarget && (dTarget === tNorm || dTarget.includes(tNorm) || tNorm.includes(dTarget));
+      const isAuthorMatch = !cNorm || (dAuthor && (dAuthor === cNorm || dAuthor.includes(cNorm) || cNorm.includes(dAuthor)));
+
+      if (isExactId || (isEntityMatch && isAuthorMatch)) {
+        const ref = db._doc(db, 'evaluations', docSnap.id);
+        updatePromises.push(
+          db._setDoc(ref, updateData, { merge: true })
+            .then(() => { console.log(`[WF] Fallback setDoc OK → doc ${docSnap.id} workflowStep=${stepNum}`); updated = true; })
+            .catch(e => console.warn(`[WF] Fallback setDoc failed for ${docSnap.id}:`, String(e)))
+        );
+      }
+    });
+
+    if (updatePromises.length > 0) {
+      await Promise.all(updatePromises);
+    } else if (!updated) {
+      console.warn(`[WF] No matching Firestore doc found for evalId=${evalId} entity=${targetEntity} author=${clientName}`);
+    }
+  } catch (scanErr) {
+    console.warn('[WF] Collection scan error:', String(scanErr));
+  }
+
+  return updated;
+}
+
 
 /**
  * Load all registered users from Firestore users collection (for admin panel).

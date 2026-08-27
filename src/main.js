@@ -364,6 +364,13 @@ class PerfECTApp {
         };
 
         const promises = [];
+        const selectedCountry = this.appState.selectedCountry || 'TN';
+        promises.push(firestoreLoadEvaluations(selectedCountry).then(countryEvals => {
+          if (countryEvals && countryEvals.length > 0) {
+            this.appState.data.recentEvaluations = countryEvals;
+          }
+        }).catch(() => {}));
+
         if (profileUserEmail) {
           promises.push(firestoreLoadUserEvaluations(profileUserEmail).then(userEvals => {
             if (userEvals && userEvals.length > 0) {

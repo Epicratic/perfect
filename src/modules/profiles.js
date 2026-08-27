@@ -1,5 +1,5 @@
 import { initRadarChart, renderRadarChartHTML } from '../components/radar.js';
-import { firestoreUpdateUserProfile, dbStorage, firestoreSendMessage, firestoreLoadUserConversations, firestoreMarkConversationRead } from '../config/firebase.js';
+import { firestoreUpdateUserProfile, dbStorage, firestoreSendMessage, firestoreLoadUserConversations, firestoreMarkConversationRead, firestoreUpdateEvaluationWorkflow } from '../config/firebase.js';
 import { getRadarScoresFromEvals } from './analytics.js';
 import { compressImageFile } from '../utils/imageCompressor.js';
 import { attachLightboxToImages } from '../utils/imageLightbox.js';
@@ -99,9 +99,32 @@ export function renderProfilesView(appState, translations) {
   const unreadClientCount = isFree ? userConversations.filter(c => c.unreadForClient).length : userConversations.filter(c => c.unreadForEnterprise).length;
 
   // ── Compute real stats from user's Firestore evaluations ─────────────────
-  const userEvals = (appState.currentUserEvals && appState.currentUserEvals.length > 0)
-    ? appState.currentUserEvals
-    : [];
+  const normEmail = (currentUser && currentUser.email ? currentUser.email : displayEmail).toLowerCase().trim();
+  const normName = displayName.toLowerCase().trim();
+
+  const allRecent = (appState.data && appState.data.recentEvaluations) || [];
+  const rawUserEvals = (appState.currentUserEvals && appState.currentUserEvals.length > 0) ? appState.currentUserEvals : [];
+
+  const userEvalsMap = new Map();
+  rawUserEvals.forEach(e => {
+    if (e) {
+      const key = e.id || `${e.targetEntity || e.actorName}-${e.rating}-${e.date || ''}`;
+      userEvalsMap.set(key, e);
+    }
+  });
+
+  allRecent.forEach(e => {
+    if (e) {
+      const eEmail = (e.authorEmail || '').toLowerCase().trim();
+      const eName = (e.authorName || e.author || '').toLowerCase().trim();
+      if ((normEmail && eEmail === normEmail) || (normName && eName === normName)) {
+        const key = e.id || `${e.targetEntity || e.actorName}-${e.rating}-${e.date || ''}`;
+        userEvalsMap.set(key, e);
+      }
+    }
+  });
+
+  const userEvals = Array.from(userEvalsMap.values());
 
   const evalCount = userEvals.length;
   const avgScore = evalCount > 0
@@ -185,6 +208,9 @@ export function renderProfilesView(appState, translations) {
     timeAgo: e.timeAgo || 'Récemment',
     rating: e.rating || 0,
     comment: e.comment || '',
+    workflowStep: parseInt(e.workflowStep || e.step || 0),
+    statusLabel: "État de prise en compte de la demande",
+    authorEmail: e.authorEmail || '',
     attachmentName: e.attachmentName || null,
     attachmentBase64: e.attachmentBase64 || e.photoUrl || null,
     photoUrl: e.photoUrl || e.attachmentBase64 || null
@@ -278,8 +304,9 @@ export function renderProfilesView(appState, translations) {
     timeAgo: e.timeAgo || 'Récemment',
     rating: parseFloat(e.rating) || 0,
     comment: e.comment || 'Évaluation partagée.',
-    step: 2,
+    workflowStep: parseInt(e.workflowStep || e.step || 0),
     statusLabel: "État de prise en compte de la demande",
+    authorEmail: e.authorEmail || '',
     attachmentName: e.attachmentName || null,
     attachmentBase64: e.attachmentBase64 || e.photoUrl || null,
     photoUrl: e.photoUrl || e.attachmentBase64 || null
@@ -434,7 +461,9 @@ export function renderProfilesView(appState, translations) {
         const starsStr = '★'.repeat(Math.min(5, fullStars)) + '☆'.repeat(Math.max(0, 5 - fullStars));
 
         return `
-          <div class="recent-rating-item">
+          <div class="recent-rating-item" 
+            data-sector="${(item.sectorName || item.macroSector || item.sector || '').replace(/"/g, '&quot;')}"
+            data-actor="${(item.targetEntity || '').replace(/"/g, '&quot;')}">
             <div class="rating-user-avatar-circle" style="background: ${item.authorAvatarBg || '#002B49'}; color: ${item.authorAvatarColor || '#FFFFFF'};">
               ${item.authorInitials || 'U'}
             </div>
@@ -496,9 +525,22 @@ export function renderProfilesView(appState, translations) {
                 </div>
               ` : ''}
 
-              <div class="rating-meta-footer">
-                <span>📍 ${item.location || 'Tunisie'}</span>
-                <span>⏱️ ${item.timeAgo || 'Récemment'}</span>
+              <div style="display: flex; justify-content: space-between; align-items: flex-end; padding-top: 8px; border-top: 1px dashed #E2E8F0; margin-top: 8px; flex-wrap: wrap; gap: 8px;">
+                <div class="rating-meta-footer" style="margin-top: 0;">
+                  <span>📍 ${item.location || 'Tunisie'}</span>
+                  <span>⏱️ ${item.timeAgo || 'Récemment'}</span>
+                </div>
+
+                <div style="text-align: right;">
+                  <div style="font-size: 8.5px; color: #64748B; margin-bottom: 3px; font-weight: 700;">État de prise en compte de la demande</div>
+                  <div style="display: flex; gap: 3px; justify-content: flex-end;" title="Niveau d'avancement de la prise en compte : ${item.workflowStep > 0 ? 'Étape ' + item.workflowStep + '/5' : 'En attente'}">
+                    ${[1, 2, 3, 4, 5].map(step => `
+                      <span style="width: 14px; height: 14px; border-radius: 3px; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center; ${step <= (item.workflowStep || 0) ? 'background: #00A859; color: white;' : 'background: #E2E8F0; color: #64748B;'}">
+                        ${step}
+                      </span>
+                    `).join('')}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -536,7 +578,9 @@ export function renderProfilesView(appState, translations) {
             }
 
             return `
-              <div class="recent-rating-item" style="flex-direction: column; align-items: stretch; gap: 8px;">
+              <div class="recent-rating-item" style="flex-direction: column; align-items: stretch; gap: 8px;"
+                data-pillar="${(item.pillar || item.societalPillar || '').replace(/"/g, '&quot;')}"
+                data-indicator="${(mainIndicator || kpiLabel || '').replace(/"/g, '&quot;')}">
                 <div style="display: flex; gap: 10px; align-items: flex-start;">
                   <div class="rating-user-avatar-circle" style="background: ${item.authorAvatarBg}; color: ${item.authorAvatarColor};">
                     ${item.authorInitials}
@@ -612,11 +656,22 @@ export function renderProfilesView(appState, translations) {
                     🛡️ Contacter le client
                   </button>
 
-                  <div style="text-align: right;">
-                    <div style="font-size: 9px; color: #64748B; margin-bottom: 2px;">${item.statusLabel}</div>
+                  <div class="btn-workflow-trigger" 
+                    data-eval-id="${item.id}"
+                    data-workflow-step="${item.workflowStep || 0}"
+                    data-client-name="${item.authorName || 'Contributeur'}"
+                    data-entity-name="${item.targetEntity || enterpriseActorName}"
+                    data-eval-rating="${item.rating || 0}"
+                    data-eval-comment="${(item.comment || '').replace(/"/g, '&quot;')}"
+                    style="text-align: right; cursor: pointer; padding: 4px 8px; border-radius: 8px; background: #F8FAFC; border: 1px solid #E2E8F0; transition: all 0.2s ease;"
+                    title="Cliquer pour mettre à jour l'état de prise en compte">
+                    <div style="font-size: 8.5px; color: #002B49; margin-bottom: 3px; font-weight: 700; display: flex; align-items: center; justify-content: flex-end; gap: 4px;">
+                      <span>${item.statusLabel || 'État de prise en compte'}</span>
+                      <span style="font-size: 10px; color: #00A859;">⚙️ Modifier</span>
+                    </div>
                     <div style="display: flex; gap: 3px; justify-content: flex-end;">
                       ${[1, 2, 3, 4, 5].map(step => `
-                        <span style="width: 14px; height: 14px; border-radius: 3px; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center; ${step === item.step ? 'background: #00A859; color: white;' : 'background: #E2E8F0; color: #64748B;'}">
+                        <span style="width: 14px; height: 14px; border-radius: 3px; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center; ${step <= (item.workflowStep || 0) ? 'background: #00A859; color: white;' : 'background: #E2E8F0; color: #64748B;'}">
                           ${step}
                         </span>
                       `).join('')}
@@ -845,17 +900,112 @@ export function renderProfilesView(appState, translations) {
       <!-- CARD 4: Badges Gallery (Free Profile Only) -->
       ${badgesGalleryHTML}
 
-      <!-- CARD 5: Evaluation History -->
-      <div class="card">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-          <div class="card-title">Historique des Évaluations</div>
-          <a href="#" style="font-size: 11px; color: #00A859; font-weight: 700; text-decoration: underline;">Tout voir</a>
-        </div>
+      <!-- CARD 5: Evaluation History (with filters) -->
+      <div class="card" id="card-eval-history">
+        ${isFree ? (() => {
+          // ── Ordered FR sector list (same order as all other pages) ──
+          const SECTOR_ORDER_FR = [
+            { key: 'Governance',         frLabel: 'Gouvernance',            match: (v) => /gouv|gov|just|parl/i.test(v) },
+            { key: 'SecurityDefense',    frLabel: 'Sécurité & Défense',     match: (v) => /séc|sec|déf|def|polic|gend/i.test(v) },
+            { key: 'HealthHygiene',      frLabel: 'Santé & Hygiène',        match: (v) => /sant|hyg|med|pharm|hopit|hôpit/i.test(v) },
+            { key: 'InstructionCulture', frLabel: 'Instruction & Culture',  match: (v) => /inst|cult|educ|éduc|univ|ecol|école|école/i.test(v) },
+            { key: 'FoodFinance',        frLabel: 'Alimentation & Finance', match: (v) => /alim|finan|banq|rest|cafet/i.test(v) },
+            { key: 'HousingTourism',     frLabel: 'Logement & Tourisme',    match: (v) => /log|tour|hotel|hôt/i.test(v) },
+            { key: 'TransportTelco',     frLabel: 'Transport & Télécoms',   match: (v) => /trans|tél|tel|post|auto/i.test(v) }
+          ];
+          // Map each eval's raw sector string to FR label
+          const normSector = (v) => {
+            if (!v) return '';
+            const found = SECTOR_ORDER_FR.find(s => s.match(v) || v.toLowerCase().includes(s.frLabel.toLowerCase().split(' ')[0].toLowerCase()));
+            return found ? found.frLabel : v;
+          };
+          // Build ordered list of sectors actually present in history
+          const presentFrSectors = SECTOR_ORDER_FR
+            .map(s => s.frLabel)
+            .filter(fr => freeUserData.history.some(h => normSector(h.sectorName || h.macroSector || h.sector || '') === fr));
 
-        <div>
+          // All unique actors (for initial load, unfiltered)
+          const allActors = [...new Set(freeUserData.history.map(h => h.targetEntity || '').filter(Boolean))].sort();
+
+          return `
+          <!-- Free user filters: by Sector and by Actor (cascading) -->
+          <div style="margin-bottom: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+              <div class="card-title">Historique des Évaluations</div>
+              <span id="free-history-count" style="font-size: 10px; color: #64748B; font-weight: 600;">${freeUserData.history.length} fiche${freeUserData.history.length > 1 ? 's' : ''}</span>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <div style="flex: 1; min-width: 120px;">
+                <label style="font-size: 9px; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 4px;">🏛️ Secteur</label>
+                <select id="filter-free-sector" style="width: 100%; padding: 6px 8px; border: 1.5px solid #E2E8F0; border-radius: 8px; font-size: 10.5px; color: #002B49; background: #F8FAFC; font-weight: 600; -webkit-appearance: none; appearance: none;">
+                  <option value="">Tous les secteurs</option>
+                  ${presentFrSectors.map(fr => `<option value="${fr}">${fr}</option>`).join('')}
+                </select>
+              </div>
+              <div style="flex: 1; min-width: 120px;">
+                <label style="font-size: 9px; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 4px;">🏢 Acteur</label>
+                <select id="filter-free-actor" style="width: 100%; padding: 6px 8px; border: 1.5px solid #E2E8F0; border-radius: 8px; font-size: 10.5px; color: #002B49; background: #F8FAFC; font-weight: 600; -webkit-appearance: none; appearance: none;">
+                  <option value="">Tous les acteurs</option>
+                  ${allActors.map(a => `<option value="${a}">${a}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+          </div>`;
+        })() : (() => {
+          // ── Enterprise indicator filter using FR names from indicatorNamesMap ──
+          const indicatorNamesMapFR = {
+            'Staff': 'Personnel',
+            'Facility': 'Infrastructures',
+            'Programs': 'Programmes',
+            'InvestmentAmount': 'Investissements',
+            'JobsCreated': 'Emplois créés',
+            'ValueAdded': 'Valeur ajoutée',
+            'PollutionEmission': 'Émission de pollution',
+            'ResourceConsumption': 'Consommation de ressources',
+            'Resilience': 'Résilience aux catastrophes'
+          };
+          const getMappedIndicator = (h) => {
+            const raw = h.category || h.indicatorCategory || '';
+            return indicatorNamesMapFR[raw] || raw || h.type || h.indicatorType || h.kpi || '';
+          };
+          const presentIndicators = [...new Set(paidEnterpriseData.history.map(h => getMappedIndicator(h)).filter(Boolean))].sort();
+          const presentPillars = [...new Set(paidEnterpriseData.history.map(h => h.pillar || h.societalPillar || '').filter(Boolean))].sort();
+
+          return `
+          <!-- Enterprise filters: by Performance (pillar) and by Indicator (FR names) -->
+          <div style="margin-bottom: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+              <div class="card-title">Historique des Évaluations</div>
+              <span id="ent-history-count" style="font-size: 10px; color: #64748B; font-weight: 600;">${paidEnterpriseData.history.length} fiche${paidEnterpriseData.history.length > 1 ? 's' : ''}</span>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <div style="flex: 1; min-width: 120px;">
+                <label style="font-size: 9px; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 4px;">🎯 Performance</label>
+                <select id="filter-ent-pillar" style="width: 100%; padding: 6px 8px; border: 1.5px solid #E2E8F0; border-radius: 8px; font-size: 10.5px; color: #002B49; background: #F8FAFC; font-weight: 600; -webkit-appearance: none; appearance: none;">
+                  <option value="">Toutes les performances</option>
+                  ${presentPillars.map(p => `<option value="${p}">${p}</option>`).join('')}
+                </select>
+              </div>
+              <div style="flex: 1; min-width: 120px;">
+                <label style="font-size: 9px; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 4px;">📊 Indicateur</label>
+                <select id="filter-ent-indicator" style="width: 100%; padding: 6px 8px; border: 1.5px solid #E2E8F0; border-radius: 8px; font-size: 10.5px; color: #002B49; background: #F8FAFC; font-weight: 600; -webkit-appearance: none; appearance: none;">
+                  <option value="">Tous les indicateurs</option>
+                  ${presentIndicators.map(i => `<option value="${i}">${i}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+          </div>`;
+        })()}
+
+
+        <div id="history-items-list">
           ${historyItemsHTML}
         </div>
+        <div id="history-no-results" style="display:none; text-align: center; padding: 20px; color: #94A3B8; font-size: 11.5px;">
+          🔍 Aucune évaluation ne correspond aux filtres sélectionnés.
+        </div>
       </div>
+
 
       <!-- CARD 6: Messages Reçus (Client Inbox) -->
       ${isFree ? `
@@ -940,6 +1090,110 @@ export function attachProfilesEvents(containerEl, appState, renderCallback, onEx
       if (renderCallback) renderCallback();
     });
   }
+
+  // --- History Filters ---
+  const historyList = containerEl.querySelector('#history-items-list');
+  const historyNoResults = containerEl.querySelector('#history-no-results');
+
+  // FR sector normalization (same order/labels as all other pages)
+  const SECTOR_ORDER_FR = [
+    { frLabel: 'Gouvernance',            match: (v) => /gouv|gov|just|parl/i.test(v) },
+    { frLabel: 'Sécurité & Défense',     match: (v) => /séc|sec|déf|def|polic|gend/i.test(v) },
+    { frLabel: 'Santé & Hygiène',        match: (v) => /sant|hyg|med|pharm|hopit|hôpit/i.test(v) },
+    { frLabel: 'Instruction & Culture',  match: (v) => /inst|cult|educ|éduc|univ|ecol|école/i.test(v) },
+    { frLabel: 'Alimentation & Finance', match: (v) => /alim|finan|banq|rest|cafet/i.test(v) },
+    { frLabel: 'Logement & Tourisme',    match: (v) => /log|tour|hotel|hôt/i.test(v) },
+    { frLabel: 'Transport & Télécoms',   match: (v) => /trans|tél|tel|post|auto/i.test(v) }
+  ];
+  const normSectorToFR = (v) => {
+    if (!v) return '';
+    const found = SECTOR_ORDER_FR.find(s => s.match(v) || v.toLowerCase().includes(s.frLabel.toLowerCase().split(' ')[0].toLowerCase()));
+    return found ? found.frLabel : v;
+  };
+
+  function updateActorDropdown(sectorFilter) {
+    const actorSel = containerEl.querySelector('#filter-free-actor');
+    if (!actorSel || !historyList) return;
+    const items = historyList.querySelectorAll('.recent-rating-item');
+    const actors = new Set();
+    items.forEach(item => {
+      const rawSector = item.getAttribute('data-sector') || '';
+      const itemSectorFR = normSectorToFR(rawSector);
+      if (!sectorFilter || itemSectorFR === sectorFilter) {
+        const actor = item.getAttribute('data-actor') || '';
+        if (actor) actors.add(actor);
+      }
+    });
+    const currentActor = actorSel.value;
+    actorSel.innerHTML = '<option value="">Tous les acteurs</option>' +
+      [...actors].sort().map(a => `<option value="${a}"${a === currentActor ? ' selected' : ''}>${a}</option>`).join('');
+  }
+
+  function applyHistoryFilters() {
+    if (!historyList) return;
+    const items = historyList.querySelectorAll('.recent-rating-item');
+    let visibleCount = 0;
+
+    if (isFree) {
+      const sectorSel = containerEl.querySelector('#filter-free-sector');
+      const actorSel = containerEl.querySelector('#filter-free-actor');
+      const sectorFilter = (sectorSel || {}).value || '';
+      const actorFilter = (actorSel || {}).value || '';
+      const countEl = containerEl.querySelector('#free-history-count');
+
+      // Update actor dropdown to reflect current sector selection
+      updateActorDropdown(sectorFilter);
+
+      items.forEach(item => {
+        const rawSector = item.getAttribute('data-sector') || '';
+        const itemSectorFR = normSectorToFR(rawSector);
+        const actor = item.getAttribute('data-actor') || '';
+        const sectorOk = !sectorFilter || itemSectorFR === sectorFilter;
+        const actorOk = !actorFilter || actor === actorFilter;
+        const visible = sectorOk && actorOk;
+        item.style.display = visible ? '' : 'none';
+        if (visible) visibleCount++;
+      });
+      if (countEl) countEl.textContent = `${visibleCount} fiche${visibleCount > 1 ? 's' : ''}`;
+    } else {
+      const pillarSel = containerEl.querySelector('#filter-ent-pillar');
+      const indicatorSel = containerEl.querySelector('#filter-ent-indicator');
+      const pillarFilter = (pillarSel || {}).value || '';
+      const indicatorFilter = (indicatorSel || {}).value || '';
+      const countEl = containerEl.querySelector('#ent-history-count');
+
+      items.forEach(item => {
+        const pillar = item.getAttribute('data-pillar') || '';
+        const indicator = item.getAttribute('data-indicator') || '';
+        const visible = (!pillarFilter || pillar === pillarFilter) && (!indicatorFilter || indicator === indicatorFilter);
+        item.style.display = visible ? '' : 'none';
+        if (visible) visibleCount++;
+      });
+      if (countEl) countEl.textContent = `${visibleCount} fiche${visibleCount > 1 ? 's' : ''}`;
+    }
+
+    if (historyNoResults) {
+      historyNoResults.style.display = (visibleCount === 0 && items.length > 0) ? 'block' : 'none';
+    }
+  }
+
+  // Free user filter listeners
+  const filterFreeSector = containerEl.querySelector('#filter-free-sector');
+  const filterFreeActor = containerEl.querySelector('#filter-free-actor');
+  if (filterFreeSector) {
+    filterFreeSector.addEventListener('change', () => {
+      // Reset actor selection when sector changes, then apply
+      if (filterFreeActor) filterFreeActor.value = '';
+      applyHistoryFilters();
+    });
+  }
+  if (filterFreeActor) filterFreeActor.addEventListener('change', applyHistoryFilters);
+
+  // Enterprise filter listeners
+  const filterEntPillar = containerEl.querySelector('#filter-ent-pillar');
+  const filterEntIndicator = containerEl.querySelector('#filter-ent-indicator');
+  if (filterEntPillar) filterEntPillar.addEventListener('change', applyHistoryFilters);
+  if (filterEntIndicator) filterEntIndicator.addEventListener('change', applyHistoryFilters);
 
   // --- Avatar click & Change Photo button -> file upload ---
   const avatarWrapper = containerEl.querySelector('#profile-avatar-wrapper');
@@ -1199,6 +1453,21 @@ export function attachProfilesEvents(containerEl, appState, renderCallback, onEx
       const entityName = btn.getAttribute('data-entity-name') || '';
       const rating = btn.getAttribute('data-eval-rating') || '4';
       showContactClientModal({ evalId, clientName, clientEmail, entityName, rating }, appState, renderCallback);
+    });
+  });
+
+  // --- Workflow Status triggers (Enterprise side) ---
+  const workflowTriggers = containerEl.querySelectorAll('.btn-workflow-trigger');
+  workflowTriggers.forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const evalId = btn.getAttribute('data-eval-id') || '';
+      const currentStep = parseInt(btn.getAttribute('data-workflow-step') || 0);
+      const clientName = btn.getAttribute('data-client-name') || 'Contributeur';
+      const entityName = btn.getAttribute('data-entity-name') || '';
+      const rating = btn.getAttribute('data-eval-rating') || '4';
+      const comment = btn.getAttribute('data-eval-comment') || '';
+      showWorkflowStatusModal({ evalId, currentStep, clientName, entityName, rating, comment }, appState, renderCallback);
     });
   });
 
@@ -1783,4 +2052,264 @@ function showVerifyIdentityModal(appState, renderCallback) {
     if (renderCallback) renderCallback();
   });
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Workflow Status Modal for Enterprise Users
+// ─────────────────────────────────────────────────────────────────────────────
+function showWorkflowStatusModal({ evalId, currentStep, clientName, entityName, rating, comment }, appState, renderCallback) {
+  const oldModal = document.getElementById('workflow-status-modal');
+  if (oldModal) oldModal.remove();
+
+  let selectedStep = parseInt(currentStep) || 0;
+
+  const WORKFLOW_STAGES = [
+    {
+      step: 1,
+      title: "Étape 1 : Accusé de réception",
+      desc: "L'établissement accuse bonne réception du rating et des remarques formulées."
+    },
+    {
+      step: 2,
+      title: "Étape 2 : Identification des solutions",
+      desc: "Les procédures internes sont initiées pour identifier les solutions et actions requises."
+    },
+    {
+      step: 3,
+      title: "Étape 3 : Début de mise en œuvre",
+      desc: "La mise en œuvre des solutions et actions correctives a débuté sur le terrain."
+    },
+    {
+      step: 4,
+      title: "Étape 4 : Mi-parcours de réalisation",
+      desc: "La mise en œuvre des solutions est avancée à mi-parcours de son déploiement."
+    },
+    {
+      step: 5,
+      title: "Étape 5 : Finalisation & Demande traitée",
+      desc: "La mise en œuvre des solutions est finalisée ; la demande a été pleinement prise en compte."
+    }
+  ];
+
+  const modalOverlay = document.createElement('div');
+  modalOverlay.id = 'workflow-status-modal';
+  modalOverlay.style.cssText = `
+    position: fixed; inset: 0; background: rgba(0, 43, 73, 0.65); backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center; z-index: 99999; padding: 16px;
+    animation: fadeIn 0.2s ease;
+  `;
+
+  function renderModalContent() {
+    const stepsHTML = WORKFLOW_STAGES.map(s => {
+      const isSelected = selectedStep === s.step;
+      const isPast = selectedStep > s.step;
+      const borderColor = isSelected ? '#00A859' : (isPast ? '#A7F3D0' : '#E2E8F0');
+      const bgColor = isSelected ? '#F0FDF4' : (isPast ? '#F8FAFC' : '#FFFFFF');
+      const badgeBg = isSelected ? '#00A859' : (isPast ? '#10B981' : '#E2E8F0');
+      const badgeColor = (isSelected || isPast) ? '#FFFFFF' : '#64748B';
+
+      return `
+        <div class="workflow-step-option" data-step="${s.step}" style="
+          border: 2px solid ${borderColor};
+          background: ${bgColor};
+          border-radius: 12px;
+          padding: 12px 14px;
+          cursor: pointer;
+          transition: all 0.15s ease;
+          display: flex;
+          align-items: flex-start;
+          gap: 12px;
+          box-shadow: ${isSelected ? '0 4px 12px rgba(0, 168, 89, 0.12)' : 'none'};
+        ">
+          <div style="
+            width: 26px; height: 26px; border-radius: 50%;
+            background: ${badgeBg}; color: ${badgeColor};
+            font-size: 11px; font-weight: 800;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0; margin-top: 1px;
+          ">
+            ${isPast ? '✓' : s.step}
+          </div>
+
+          <div style="flex: 1;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
+              <span style="font-size: 12px; font-weight: 800; color: ${isSelected ? '#007A3D' : '#002B49'};">
+                ${s.title}
+              </span>
+              ${isSelected ? `
+                <span style="font-size: 9px; font-weight: 800; background: #D1FADF; color: #027A48; padding: 2px 7px; border-radius: 8px;">
+                  Étape Actuelle
+                </span>
+              ` : (isPast ? `
+                <span style="font-size: 9px; font-weight: 700; color: #059669;">
+                  ✓ Validée
+                </span>
+              ` : '')}
+            </div>
+            <p style="font-size: 10.5px; color: #64748B; margin: 0; line-height: 1.4;">
+              ${s.desc}
+            </p>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    modalOverlay.innerHTML = `
+      <div style="
+        background: #FFFFFF; border-radius: 20px; max-width: 480px; width: 100%; max-height: 90vh;
+        overflow-y: auto; box-shadow: 0 20px 40px rgba(0, 43, 73, 0.25); border: 1px solid #E2E8F0;
+        display: flex; flex-direction: column;
+      ">
+        <!-- Header -->
+        <div style="
+          padding: 16px 20px; border-bottom: 1px solid #F1F5F9;
+          display: flex; justify-content: space-between; align-items: center; background: #FAFBFD;
+          border-top-left-radius: 20px; border-top-right-radius: 20px;
+        ">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 20px;">⚙️</span>
+            <div>
+              <div style="font-size: 14px; font-weight: 800; color: #002B49;">État de prise en compte</div>
+              <div style="font-size: 10px; color: #64748B;">Progression du traitement de l'évaluation</div>
+            </div>
+          </div>
+          <button id="btn-close-workflow-modal" style="
+            background: #F1F5F9; border: none; font-size: 16px; width: 28px; height: 28px;
+            border-radius: 50%; color: #64748B; cursor: pointer; display: flex; align-items: center; justify-content: center;
+          ">×</button>
+        </div>
+
+        <!-- Rating Context Summary Box -->
+        <div style="padding: 14px 20px 0 20px;">
+          <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 12px; padding: 10px 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span style="font-size: 11px; font-weight: 700; color: #002B49;">👤 ${clientName}</span>
+              <span style="font-size: 11px; font-weight: 800; color: #00A859;">★ ${parseFloat(rating || 0).toFixed(1)}/5.0</span>
+            </div>
+            ${comment ? `
+              <div style="font-size: 10px; color: #475569; font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                "${comment}"
+              </div>
+            ` : ''}
+          </div>
+        </div>
+
+        <!-- Steps Selection List -->
+        <div style="padding: 14px 20px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="font-size: 11px; font-weight: 700; color: #002B49; margin-bottom: 2px;">
+            Sélectionnez l'étape d'avancement atteinte :
+          </div>
+          ${stepsHTML}
+        </div>
+
+        <!-- Footer Actions -->
+        <div style="
+          padding: 14px 20px 18px 20px; border-top: 1px solid #F1F5F9; background: #FAFBFD;
+          display: flex; gap: 10px; align-items: center; justify-content: space-between;
+          border-bottom-left-radius: 20px; border-bottom-right-radius: 20px;
+        ">
+          <button id="btn-reset-workflow-step" style="
+            background: none; border: 1px solid #CBD5E1; color: #64748B; padding: 8px 12px;
+            border-radius: 10px; font-size: 11px; font-weight: 600; cursor: pointer;
+          " title="Remettre à l'état initial non initié">
+            🔄 Réinitialiser
+          </button>
+
+          <div style="display: flex; gap: 8px;">
+            <button id="btn-cancel-workflow" style="
+              background: #F1F5F9; border: none; color: #475569; padding: 8px 14px;
+              border-radius: 10px; font-size: 11px; font-weight: 700; cursor: pointer;
+            ">
+              Annuler
+            </button>
+            <button id="btn-save-workflow" style="
+              background: #00A859; border: none; color: #FFFFFF; padding: 8px 18px;
+              border-radius: 10px; font-size: 11px; font-weight: 800; cursor: pointer;
+              box-shadow: 0 4px 12px rgba(0, 168, 89, 0.25);
+            ">
+              Enregistrer l'étape
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Attach step click handlers
+    modalOverlay.querySelectorAll('.workflow-step-option').forEach(el => {
+      el.addEventListener('click', () => {
+        const stepNum = parseInt(el.getAttribute('data-step')) || 0;
+        selectedStep = stepNum;
+        renderModalContent();
+      });
+    });
+
+    // Reset button
+    const resetBtn = modalOverlay.querySelector('#btn-reset-workflow-step');
+    if (resetBtn) {
+      resetBtn.addEventListener('click', () => {
+        selectedStep = 0;
+        renderModalContent();
+      });
+    }
+
+    // Close & Cancel
+    const closeBtn = modalOverlay.querySelector('#btn-close-workflow-modal');
+    if (closeBtn) closeBtn.addEventListener('click', () => modalOverlay.remove());
+
+    const cancelBtn = modalOverlay.querySelector('#btn-cancel-workflow');
+    if (cancelBtn) cancelBtn.addEventListener('click', () => modalOverlay.remove());
+
+    // Save button
+    const saveBtn = modalOverlay.querySelector('#btn-save-workflow');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', async () => {
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Enregistrement...';
+
+        const currentUser = appState.currentUser || {};
+        const updaterEmail = currentUser.email || currentUser.name || '';
+
+        // 1. Update in Firestore
+        try {
+          await firestoreUpdateEvaluationWorkflow(evalId, selectedStep, updaterEmail, entityName, clientName);
+        } catch (err) {
+          console.warn('Could not sync workflow step to Firestore:', err);
+        }
+
+        // 2. Update in-memory state
+        if (appState.data && Array.isArray(appState.data.recentEvaluations)) {
+          const match = appState.data.recentEvaluations.find(e => e.id === evalId || (e.targetEntity === entityName && e.authorName === clientName));
+          if (match) match.workflowStep = selectedStep;
+        }
+
+        if (Array.isArray(appState.currentUserEvals)) {
+          const match = appState.currentUserEvals.find(e => e.id === evalId || (e.targetEntity === entityName && e.authorName === clientName));
+          if (match) match.workflowStep = selectedStep;
+        }
+
+        modalOverlay.remove();
+
+        // 3. Success Toast
+        const toast = document.createElement('div');
+        toast.style.cssText = `
+          position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+          background: #002B49; color: white; padding: 12px 20px; border-radius: 14px;
+          font-size: 12px; font-weight: 700; z-index: 99999; box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+          animation: fadeIn 0.3s ease;
+        `;
+        toast.textContent = selectedStep > 0
+          ? `✅ Étape ${selectedStep}/5 enregistrée ! Votre client peut maintenant suivre l'avancement.`
+          : `✅ État de prise en compte réinitialisé.`;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 4000);
+
+        // 4. Re-render profile history view
+        if (renderCallback) renderCallback();
+      });
+    }
+  }
+
+  renderModalContent();
+  document.body.appendChild(modalOverlay);
+}
+
 
