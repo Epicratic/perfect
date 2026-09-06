@@ -440,7 +440,7 @@ export function renderProfilesView(appState, translations) {
 
   // Render History Items — same format as analytics/dashboard buildEvalItemHTML
   const historyItemsHTML = isFree
-    ? freeUserData.history.map(item => {
+    ? freeUserData.history.map((item, idx) => {
         const sectorLabel = item.sectorName || item.macroSector || item.sector || '';
         const subSectorLabel = item.mesoSector || item.subSector || '';
         const perfLabel = item.pillar || item.societalPillar || '';
@@ -460,14 +460,33 @@ export function renderProfilesView(appState, translations) {
         const fullStars = Math.floor(ratingNum);
         const starsStr = '★'.repeat(Math.min(5, fullStars)) + '☆'.repeat(Math.max(0, 5 - fullStars));
 
+        const isHighlighted = appState.highlightedEvalId && (String(appState.highlightedEvalId) === String(item.id));
+        const isExtra = idx >= 10;
+        const shouldHide = isExtra && !isHighlighted;
+
+        // Check if there is an active discussion thread for this specific rating
+        const itemConv = userConversations.find(c => c && (String(c.evalId) === String(item.id) || (c.id && c.id.includes(item.id))));
+        const hasUnread = itemConv && Boolean(itemConv.unreadForClient);
+        const convMsgCount = (itemConv && itemConv.messages && itemConv.messages.length) || 0;
+
         return `
-          <div class="recent-rating-item" 
+          <div class="recent-rating-item ${isExtra ? 'history-extra-item' : ''} ${isHighlighted ? 'highlighted-eval-card' : ''}" 
+            id="rating-item-${item.id}"
+            data-eval-id="${item.id}"
+            data-item-index="${idx}"
             data-sector="${(item.sectorName || item.macroSector || item.sector || '').replace(/"/g, '&quot;')}"
-            data-actor="${(item.targetEntity || '').replace(/"/g, '&quot;')}">
+            data-actor="${(item.targetEntity || '').replace(/"/g, '&quot;')}"
+            style="${shouldHide ? 'display: none !important;' : ''} ${isHighlighted ? 'border: 2.5px solid #00A859 !important; box-shadow: 0 0 22px rgba(0, 168, 89, 0.45) !important; background: #F0FDF4 !important; transition: all 0.3s ease; position: relative;' : ''}">
             <div class="rating-user-avatar-circle" style="background: ${item.authorAvatarBg || '#002B49'}; color: ${item.authorAvatarColor || '#FFFFFF'};">
               ${item.authorInitials || 'U'}
             </div>
             <div style="flex: 1;">
+              ${isHighlighted ? `
+                <div class="highlight-badge-dismiss" style="background: #00A859; color: #FFFFFF; font-size: 10px; font-weight: 800; padding: 6px 10px; border-radius: 8px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 6px rgba(0,168,89,0.3); cursor: pointer;">
+                  <span>🔔 Étape ${item.workflowStep || 1}/5 mise à jour par l'opérateur !</span>
+                  <span style="font-size: 9px; opacity: 0.95; font-weight: 600; text-decoration: underline;">Cliquer pour masquer ✕</span>
+                </div>
+              ` : ''}
               <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
                 <div style="font-size: 12px; font-weight: 700; color: #002B49;">
                   ${item.authorName || 'Contributeur'} <span style="font-weight: 400; color: #64748B;">a noté</span>
@@ -480,6 +499,9 @@ export function renderProfilesView(appState, translations) {
                   data-comment="${(item.comment || '').replace(/"/g, '&quot;')}"
                   data-location="${(item.location || 'Tunisie').replace(/"/g, '&quot;')}"
                   data-sector="${(sectorLabel || '').replace(/"/g, '&quot;')}"
+                  data-subsector="${(subSectorLabel || '').replace(/"/g, '&quot;')}"
+                  data-pillar="${(perfLabel || '').replace(/"/g, '&quot;')}"
+                  data-indicator="${(kpiLabel || '').replace(/"/g, '&quot;')}"
                   title="Partager cette évaluation sur Facebook"
                   style="background: #1877F2; color: #FFFFFF; border: none; border-radius: 6px; padding: 3px 8px; font-size: 9.5px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; flex-shrink: 0; box-shadow: 0 1px 3px rgba(24, 119, 242, 0.3); transition: all 0.15s ease;">
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="#FFFFFF" style="flex-shrink: 0;">
@@ -541,20 +563,35 @@ export function renderProfilesView(appState, translations) {
                 </div>
               ` : ''}
 
-              <div style="display: flex; justify-content: space-between; align-items: flex-end; padding-top: 8px; border-top: 1px dashed #E2E8F0; margin-top: 8px; flex-wrap: wrap; gap: 8px;">
+              <!-- Rating Footer: Location, Date & Discussion / Status Action Bar -->
+              <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 8px; border-top: 1px dashed #E2E8F0; margin-top: 8px; flex-wrap: wrap; gap: 8px;">
                 <div class="rating-meta-footer" style="margin-top: 0;">
                   <span>📍 ${item.location || 'Tunisie'}</span>
                   <span>⏱️ ${item.timeAgo || 'Récemment'}</span>
                 </div>
 
-                <div style="text-align: right;">
-                  <div style="font-size: 8.5px; color: #64748B; margin-bottom: 3px; font-weight: 700;">État de prise en compte de la demande</div>
-                  <div style="display: flex; gap: 3px; justify-content: flex-end;" title="Niveau d'avancement de la prise en compte : ${item.workflowStep > 0 ? 'Étape ' + item.workflowStep + '/5' : 'En attente'}">
-                    ${[1, 2, 3, 4, 5].map(step => `
-                      <span style="width: 14px; height: 14px; border-radius: 3px; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center; ${step <= (item.workflowStep || 0) ? 'background: #00A859; color: white;' : 'background: #E2E8F0; color: #64748B;'}">
-                        ${step}
-                      </span>
-                    `).join('')}
+                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end;">
+                  <!-- Bouton "Ouvrir la discussion" directly to the left of "État de prise en compte" -->
+                  <button class="btn btn-outline btn-open-client-chat" 
+                    data-eval-id="${item.id}"
+                    data-entity-name="${(item.targetEntity || '').replace(/"/g, '&quot;')}"
+                    data-client-name="${(item.authorName || '').replace(/"/g, '&quot;')}"
+                    data-client-email="${item.authorEmail || ''}"
+                    data-has-unread="${hasUnread ? 'true' : 'false'}"
+                    style="width: auto; padding: 4px 10px; font-size: 10px; font-weight: 700; border-radius: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; transition: all 0.2s ease; ${hasUnread ? 'background: #F0FDF4; border: 1.5px solid #00A859; color: #00A859;' : (convMsgCount > 0 ? 'background: #EFF6FF; border: 1.5px solid #3B82F6; color: #1D4ED8;' : 'background: #F8FAFC; border: 1px solid #CBD5E1; color: #475569;')}">
+                    💬 <span>Ouvrir la discussion</span>
+                    ${hasUnread ? `<span style="background: #00A859; color: white; font-size: 8px; font-weight: 800; padding: 1px 5px; border-radius: 8px;">Nouveau</span>` : (convMsgCount > 0 ? `<span style="font-size: 8.5px; opacity: 0.85;">(${convMsgCount})</span>` : '')}
+                  </button>
+
+                  <div style="text-align: right;">
+                    <div style="font-size: 8.5px; color: #64748B; margin-bottom: 3px; font-weight: 700;">État de prise en compte de la demande</div>
+                    <div style="display: flex; gap: 3px; justify-content: flex-end;" title="Niveau d'avancement de la prise en compte : ${item.workflowStep > 0 ? 'Étape ' + item.workflowStep + '/5' : 'En attente'}">
+                      ${[1, 2, 3, 4, 5].map(step => `
+                        <span style="width: 14px; height: 14px; border-radius: 3px; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center; ${step <= (item.workflowStep || 0) ? 'background: #00A859; color: white;' : 'background: #E2E8F0; color: #64748B;'}">
+                          ${step}
+                        </span>
+                      `).join('')}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -593,10 +630,20 @@ export function renderProfilesView(appState, translations) {
               kpiLabel = subType || item.indicator || '';
             }
 
+            const isHighlighted = appState.highlightedEvalId && (String(appState.highlightedEvalId) === String(item.id));
+
             return `
-              <div class="recent-rating-item" style="flex-direction: column; align-items: stretch; gap: 8px;"
+              <div class="recent-rating-item ${isHighlighted ? 'highlighted-eval-card' : ''}" style="flex-direction: column; align-items: stretch; gap: 8px; ${isHighlighted ? 'border: 2.5px solid #00A859 !important; box-shadow: 0 0 22px rgba(0, 168, 89, 0.45) !important; background: #F0FDF4 !important; transition: all 0.3s ease; position: relative;' : ''}"
+                id="rating-item-${item.id}"
+                data-eval-id="${item.id}"
                 data-pillar="${(item.pillar || item.societalPillar || '').replace(/"/g, '&quot;')}"
                 data-indicator="${(mainIndicator || kpiLabel || '').replace(/"/g, '&quot;')}">
+                ${isHighlighted ? `
+                  <div class="highlight-badge-dismiss" style="background: #00A859; color: #FFFFFF; font-size: 10px; font-weight: 800; padding: 6px 10px; border-radius: 8px; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 6px rgba(0,168,89,0.3); cursor: pointer;">
+                    <span>⭐ Nouvelle évaluation reçue de ${item.authorName} !</span>
+                    <span style="font-size: 9px; opacity: 0.95; font-weight: 600; text-decoration: underline;">Cliquer pour masquer ✕</span>
+                  </div>
+                ` : ''}
                 <div style="display: flex; gap: 10px; align-items: flex-start;">
                   <div class="rating-user-avatar-circle" style="background: ${item.authorAvatarBg}; color: ${item.authorAvatarColor};">
                     ${item.authorInitials}
@@ -662,15 +709,26 @@ export function renderProfilesView(appState, translations) {
 
                 <!-- Enterprise Action & Status Bar -->
                 <div style="display: flex; justify-content: space-between; align-items: center; padding-top: 8px; border-top: 1px dashed #E2E8F0; margin-top: 4px;">
-                  <button class="btn btn-outline btn-contact-client" 
-                    data-eval-id="${item.id}" 
-                    data-client-name="${item.authorName || 'Contributeur'}" 
-                    data-client-email="${item.authorEmail || ''}"
-                    data-entity-name="${item.targetEntity || enterpriseActorName}"
-                    data-eval-rating="${item.rating || 4}"
-                    style="width: auto; padding: 4px 10px; font-size: 10px; border-radius: 12px; color: #3B82F6; border-color: #3B82F6; display: flex; align-items: center; gap: 4px; cursor: pointer;">
-                    🛡️ Contacter le client
-                  </button>
+                  ${(() => {
+                    const entItemConv = userConversations.find(c => c && (String(c.evalId) === String(item.id) || (c.id && c.id.includes(item.id))));
+                    const entHasUnread = entItemConv && Boolean(entItemConv.unreadForEnterprise);
+                    const entConvCount = (entItemConv && entItemConv.messages && entItemConv.messages.length) || 0;
+                    const hasExistingConv = Boolean(entItemConv && entConvCount > 0);
+                    return `
+                      <button class="btn btn-outline btn-contact-client" 
+                        data-eval-id="${item.id}" 
+                        data-client-name="${item.authorName || 'Contributeur'}" 
+                        data-client-email="${item.authorEmail || ''}"
+                        data-entity-name="${item.targetEntity || enterpriseActorName}"
+                        data-eval-rating="${item.rating || 4}"
+                        data-has-conv="${hasExistingConv ? 'true' : 'false'}"
+                        data-conv-id="${entItemConv ? entItemConv.id : ''}"
+                        style="width: auto; padding: 4px 10px; font-size: 10px; border-radius: 12px; display: flex; align-items: center; gap: 4px; cursor: pointer; transition: all 0.2s ease; ${entHasUnread ? 'background: #F0FDF4; border: 1.5px solid #00A859; color: #00A859;' : (hasExistingConv ? 'background: #EFF6FF; border: 1.5px solid #3B82F6; color: #1D4ED8;' : 'color: #3B82F6; border-color: #3B82F6;')}">
+                        ${hasExistingConv ? '💬 Ouvrir la discussion' : '🛡️ Contacter le client'}
+                        ${entHasUnread ? `<span style="background: #00A859; color: white; font-size: 8px; font-weight: 800; padding: 1px 5px; border-radius: 8px;">Nouveau</span>` : (entConvCount > 0 ? `<span style="font-size: 8.5px; opacity: 0.85;">(${entConvCount})</span>` : '')}
+                      </button>
+                    `;
+                  })()}
 
                   <div class="btn-workflow-trigger" 
                     data-eval-id="${item.id}"
@@ -1020,55 +1078,15 @@ export function renderProfilesView(appState, translations) {
         <div id="history-no-results" style="display:none; text-align: center; padding: 20px; color: #94A3B8; font-size: 11.5px;">
           🔍 Aucune évaluation ne correspond aux filtres sélectionnés.
         </div>
+        ${isFree && freeUserData.history.length > 10 ? `
+          <div id="history-toggle-container" style="text-align: center; margin-top: 14px; padding-top: 10px; border-top: 1px dashed #E2E8F0;">
+            <button id="btn-toggle-all-history" class="btn btn-outline" data-total-count="${freeUserData.history.length}" data-expanded="false" style="width: auto; padding: 8px 20px; font-size: 11px; font-weight: 700; border-radius: 20px; border-color: #002B49; color: #002B49; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 1px 4px rgba(0, 43, 73, 0.08); background: #FFFFFF; transition: all 0.2s ease;">
+              <span id="toggle-history-text">Afficher tout (${freeUserData.history.length} évaluations)</span>
+              <span id="toggle-history-arrow" style="font-size: 9px; transition: transform 0.2s;">▼</span>
+            </button>
+          </div>
+        ` : ''}
       </div>
-
-
-      <!-- CARD 6: Messages Reçus (Client Inbox) -->
-      ${isFree ? `
-        <div class="card" id="card-messages-recus" style="margin-top: 16px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <div class="card-title" style="margin: 0;">Messages Reçus</div>
-              ${unreadClientCount > 0 ? `<span style="background: #00A859; color: white; font-size: 9.5px; font-weight: 800; padding: 2px 8px; border-radius: 10px;">${unreadClientCount} nouveau${unreadClientCount > 1 ? 'x' : ''} 🔔</span>` : ''}
-            </div>
-            <span style="font-size: 10px; color: #64748B;">Échanges avec les structures</span>
-          </div>
-
-          <div id="messages-list-container">
-            ${userConversations.length > 0
-              ? userConversations.map(c => `
-                  <div class="conversation-card-item" data-conv-id="${c.id}" style="background: #F8FAFC; border: 1.5px solid ${c.unreadForClient ? '#00A859' : '#E2E8F0'}; border-radius: 12px; padding: 12px; margin-bottom: 10px; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
-                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
-                      <div style="display: flex; align-items: center; gap: 8px;">
-                        <div style="width: 32px; height: 32px; border-radius: 50%; background: #002B49; color: white; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 800;">🏢</div>
-                        <div>
-                          <div style="font-size: 12px; font-weight: 800; color: #002B49;">${c.enterpriseName || 'Établissement'}</div>
-                          <div style="font-size: 9px; color: #64748B;">Réponse à votre évaluation</div>
-                        </div>
-                      </div>
-                      <div style="text-align: right;">
-                        <div style="font-size: 9px; color: #94A3B8;">${c.lastUpdatedDisplay || ''}</div>
-                        ${c.unreadForClient ? `<span style="display: inline-block; background: #DCFCE7; color: #166534; font-size: 8.5px; font-weight: 800; padding: 2px 7px; border-radius: 8px; margin-top: 2px;">Nouveau</span>` : ''}
-                      </div>
-                    </div>
-                    <div style="font-size: 11px; color: #334155; padding-left: 40px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
-                      💬 <strong>Dernier message :</strong> ${c.lastMessage || 'Nouvel échange'}
-                    </div>
-                    <div style="display: flex; justify-content: flex-end; margin-top: 6px;">
-                      <span style="font-size: 10px; color: #00A859; font-weight: 700; display: flex; align-items: center; gap: 4px;">
-                        Ouvrir la discussion 💬 ➔
-                      </span>
-                    </div>
-                  </div>
-                `).join('')
-              : `<div style="text-align: center; padding: 22px 12px; color: #94A3B8; font-size: 11.5px;">
-                   📭 Aucun message reçu pour le moment.<br>
-                   <span style="font-size: 10px; color: #CBD5E1;">Lorsqu'une structure vous contactera suite à une évaluation, la discussion s'affichera ici.</span>
-                 </div>`
-            }
-          </div>
-        </div>
-      ` : ''}
     </div>
   `;
 }
@@ -1087,6 +1105,34 @@ export function attachProfilesEvents(containerEl, appState, renderCallback, onEx
     logoutBtn.addEventListener('click', () => {
       if (onLogout) onLogout();
     });
+  }
+
+  // --- Highlighted Evaluation Card Click-to-Dismiss & Auto-scroll ---
+  containerEl.querySelectorAll('.recent-rating-item.highlighted-eval-card').forEach(card => {
+    card.style.cursor = 'pointer';
+    card.addEventListener('click', (e) => {
+      // Do not dismiss if user clicked the Facebook share button or attachment photo
+      if (e.target.closest('.btn-share-facebook') || e.target.closest('.rating-attachment-image')) return;
+      card.classList.remove('highlighted-eval-card');
+      card.style.border = '';
+      card.style.boxShadow = '';
+      card.style.background = '';
+      const badge = card.querySelector('.highlight-badge-dismiss');
+      if (badge) badge.remove();
+      if (appState.highlightedEvalId && String(appState.highlightedEvalId) === String(card.getAttribute('data-eval-id'))) {
+        appState.highlightedEvalId = null;
+      }
+    });
+  });
+
+  // Auto-scroll directly to the highlighted evaluation card if active
+  if (appState.highlightedEvalId) {
+    setTimeout(() => {
+      const targetCard = containerEl.querySelector(`#rating-item-${appState.highlightedEvalId}`);
+      if (targetCard) {
+        targetCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 280);
   }
 
   // --- Toggle pill ---
@@ -1160,6 +1206,11 @@ export function attachProfilesEvents(containerEl, appState, renderCallback, onEx
       // Update actor dropdown to reflect current sector selection
       updateActorDropdown(sectorFilter);
 
+      const isFilterActive = Boolean(sectorFilter || actorFilter);
+      const toggleContainer = containerEl.querySelector('#history-toggle-container');
+      const toggleBtn = containerEl.querySelector('#btn-toggle-all-history');
+      const isExpanded = toggleBtn && toggleBtn.getAttribute('data-expanded') === 'true';
+
       items.forEach(item => {
         const rawSector = item.getAttribute('data-sector') || '';
         const itemSectorFR = normSectorToFR(rawSector);
@@ -1167,9 +1218,22 @@ export function attachProfilesEvents(containerEl, appState, renderCallback, onEx
         const sectorOk = !sectorFilter || itemSectorFR === sectorFilter;
         const actorOk = !actorFilter || actor === actorFilter;
         const visible = sectorOk && actorOk;
-        item.style.display = visible ? '' : 'none';
+
+        if (isFilterActive) {
+          item.style.setProperty('display', visible ? 'flex' : 'none', 'important');
+        } else {
+          const isExtra = item.classList.contains('history-extra-item');
+          if (isExtra && !isExpanded) {
+            item.style.setProperty('display', 'none', 'important');
+          } else {
+            item.style.setProperty('display', 'flex', 'important');
+          }
+        }
         if (visible) visibleCount++;
       });
+      if (toggleContainer) {
+        toggleContainer.style.display = isFilterActive ? 'none' : 'block';
+      }
       if (countEl) countEl.textContent = `${visibleCount} fiche${visibleCount > 1 ? 's' : ''}`;
     } else {
       const pillarSel = containerEl.querySelector('#filter-ent-pillar');
@@ -1219,44 +1283,107 @@ export function attachProfilesEvents(containerEl, appState, renderCallback, onEx
       const actor = btn.getAttribute('data-actor') || 'Établissement';
       const rating = btn.getAttribute('data-rating') || '5.0';
       const stars = btn.getAttribute('data-stars') || '★★★★★';
-      const comment = btn.getAttribute('data-comment') || '';
-      const location = btn.getAttribute('data-location') || 'Tunisie';
       const sector = btn.getAttribute('data-sector') || '';
+      const subsector = btn.getAttribute('data-subsector') || '';
+      const pillar = btn.getAttribute('data-pillar') || '';
+      const indicator = btn.getAttribute('data-indicator') || '';
+      const location = btn.getAttribute('data-location') || 'Tunisie';
+      const comment = btn.getAttribute('data-comment') || '';
 
-      const shareText = `⭐ J'ai évalué "${actor}" sur l'application PerfECT !\nNote : ${rating}/5 ${stars}\n${sector ? '🏛️ Secteur : ' + sector + '\n' : ''}📍 Localisation : ${location}\n${comment ? '💬 "' + comment + '"\n' : ''}\nSuivez et évaluez la qualité des services sur PerfECT ! 🇹🇳\n#PerfECT #EvaluationCitoyenne #Transparence\n📲 Téléchargez PerfECT ici : https://tinyurl.com/perfect-tn`;
-      const appUrl = 'https://perfect-net.firebaseapp.com';
+      const lines = [
+        `⭐ J'ai évalué "${actor}" sur l'application PerfECT !`,
+        `Note : ${rating}/5 ${stars}`
+      ];
+      if (sector) lines.push(`🏛️ Secteur : ${sector}`);
+      if (subsector) lines.push(`🔹 Sous-Secteur : ${subsector}`);
+      if (pillar) lines.push(`🎯 Performance : ${pillar}`);
+      if (indicator) lines.push(`📊 Indicateur : ${indicator}`);
+      lines.push(`📍 Localisation : ${location}`);
+      if (comment) lines.push(`💬 Commentaire : "${comment}"`);
+      lines.push('');
+      lines.push('Suivez et évaluez la qualité des services sur PerfECT ! 🇹🇳');
+      lines.push('#PerfECT #EvaluationCitoyenne #Transparence');
+      lines.push('📲 Téléchargez PerfECT ici : https://tinyurl.com/perfect-tn');
 
-      // Copy text to clipboard for user convenience
+      const shareText = lines.join('\n');
+      const appUrl = 'https://tinyurl.com/perfect-tn';
+
+      // 1. Copy text to clipboard immediately
       try {
         if (navigator.clipboard && navigator.clipboard.writeText) {
           await navigator.clipboard.writeText(shareText);
         }
       } catch (err) {}
 
-      // Try native Web Share API (opens native Facebook / share sheet on mobile)
-      if (navigator.share) {
-        try {
-          await navigator.share({
-            title: `Mon évaluation PerfECT — ${actor}`,
-            text: shareText,
-            url: appUrl
-          });
-          return;
-        } catch (shareErr) {
-          // Fallback to direct Facebook sharer URL if user cancelled or not supported
-        }
-      }
+      // 2. Open an informative modal that stays as long as the user wants
+      const oldModal = document.getElementById('facebook-share-modal');
+      if (oldModal) oldModal.remove();
 
-      // Direct Facebook Sharer URL fallback
-      const fbUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(appUrl)}&quote=${encodeURIComponent(shareText)}`;
-      window.open(fbUrl, '_blank', 'width=620,height=580');
+      const modalOverlay = document.createElement('div');
+      modalOverlay.id = 'facebook-share-modal';
+      modalOverlay.style.cssText = `
+        position: fixed; inset: 0; background: rgba(0, 43, 73, 0.7); backdrop-filter: blur(4px);
+        display: flex; align-items: center; justify-content: center; z-index: 99999; padding: 16px;
+        animation: fadeIn 0.2s ease;
+      `;
 
-      // Toast feedback
-      const toast = document.createElement('div');
-      toast.style.cssText = `position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1877F2;color:white;padding:12px 20px;border-radius:14px;font-size:12px;font-weight:700;z-index:99999;box-shadow:0 4px 20px rgba(0,0,0,0.3);animation:fadeIn 0.3s ease;`;
-      toast.textContent = '📘 Ouverture de Facebook... Texte copié dans le presse-papier !';
-      document.body.appendChild(toast);
-      setTimeout(() => toast.remove(), 4000);
+      modalOverlay.innerHTML = `
+        <div style="background: #FFFFFF; border-radius: 20px; width: 100%; max-width: 380px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); overflow: hidden; animation: slideUp 0.25s ease;">
+          <!-- Header -->
+          <div style="background: linear-gradient(135deg, #1877F2, #0C5DC7); color: white; padding: 16px 20px; display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="#FFFFFF">
+                <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+              </svg>
+              <div style="font-size: 14px; font-weight: 800;">Publication Facebook</div>
+            </div>
+            <button id="btn-close-fb-modal" style="background: transparent; border: none; color: white; font-size: 18px; cursor: pointer; padding: 4px;">✕</button>
+          </div>
+
+          <!-- Body -->
+          <div style="padding: 18px 20px;">
+            <div style="display: flex; align-items: center; gap: 8px; background: #DCFCE7; border: 1px solid #86EFAC; color: #166534; padding: 10px 12px; border-radius: 10px; font-size: 11.5px; font-weight: 700; margin-bottom: 12px;">
+              <span style="font-size: 16px;">✅</span>
+              <span>Fiche de rating copiée dans le presse-papier !</span>
+            </div>
+
+            <p style="font-size: 11.5px; color: #475569; line-height: 1.45; margin: 0 0 12px 0;">
+              Le contenu de votre évaluation est prêt. Cliquez sur le bouton ci-dessous pour ouvrir Facebook, puis <strong>collez</strong> simplement le texte dans votre publication.
+            </p>
+
+            <!-- Preview Box -->
+            <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 10px; padding: 10px 12px; font-size: 10.5px; color: #334155; line-height: 1.4; max-height: 110px; overflow-y: auto; margin-bottom: 16px; white-space: pre-line; font-family: inherit;">
+              ${shareText}
+            </div>
+
+            <!-- Actions -->
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+              <button id="btn-open-facebook-action" style="background: #1877F2; color: white; border: none; border-radius: 12px; padding: 12px; font-size: 12.5px; font-weight: 800; display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; box-shadow: 0 4px 14px rgba(24, 119, 242, 0.35); transition: all 0.2s ease;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="#FFFFFF">
+                  <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
+                </svg>
+                <span>Ouvrir Facebook & Publier ➔</span>
+              </button>
+
+              <button id="btn-cancel-fb-modal" style="background: transparent; color: #64748B; border: none; padding: 8px; font-size: 11px; font-weight: 600; cursor: pointer;">
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      document.body.appendChild(modalOverlay);
+
+      const closeModal = () => modalOverlay.remove();
+      modalOverlay.querySelector('#btn-close-fb-modal').addEventListener('click', closeModal);
+      modalOverlay.querySelector('#btn-cancel-fb-modal').addEventListener('click', closeModal);
+
+      modalOverlay.querySelector('#btn-open-facebook-action').addEventListener('click', () => {
+        closeModal();
+        const fbUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(appUrl)}&quote=${encodeURIComponent(shareText)}`;
+        window.open(fbUrl, '_blank');
+      });
     });
   });
 
@@ -1508,16 +1635,51 @@ export function attachProfilesEvents(containerEl, appState, renderCallback, onEx
     setTimeout(renderEnterpriseRadars, 800);
   }
 
-  // --- Contact Client buttons (Enterprise side) ---
+  // --- Contact Client / Discussion buttons (Enterprise side) ---
   const contactBtns = containerEl.querySelectorAll('.btn-contact-client');
   contactBtns.forEach(btn => {
     btn.addEventListener('click', () => {
       const evalId = btn.getAttribute('data-eval-id') || btn.getAttribute('data-id') || '';
       const clientName = btn.getAttribute('data-client-name') || 'Contributeur';
-      const clientEmail = btn.getAttribute('data-client-email') || '';
+      let clientEmail = btn.getAttribute('data-client-email') || '';
       const entityName = btn.getAttribute('data-entity-name') || '';
       const rating = btn.getAttribute('data-eval-rating') || '4';
-      showContactClientModal({ evalId, clientName, clientEmail, entityName, rating }, appState, renderCallback);
+
+      // Fallback: If client email is missing from the card dataset, resolve it from contributors or evaluations
+      if (!clientEmail || clientEmail === 'client') {
+        const contribs = (appState.data && appState.data.adminStats && appState.data.adminStats.contributors) || [];
+        const found = contribs.find(c => c && (c.name === clientName || c.displayName === clientName) && c.email);
+        if (found && found.email) {
+          clientEmail = found.email;
+        } else {
+          const allEvals = [...(appState.data && appState.data.recentEvaluations || []), ...(appState.currentUserEvals || [])];
+          const evalFound = allEvals.find(e => e && (e.id === evalId || e.authorName === clientName || e.author === clientName) && e.authorEmail);
+          if (evalFound && evalFound.authorEmail) {
+            clientEmail = evalFound.authorEmail;
+          }
+        }
+      }
+
+      // Check if a conversation thread already exists STRICTLY for this evaluation ID
+      let allConvs = [];
+      try {
+        const raw = localStorage.getItem("PERFECT_CONVERSATIONS_V1");
+        if (raw) allConvs = JSON.parse(raw);
+      } catch (e) {}
+
+      const cleanEntEmail = ((appState.currentUser && appState.currentUser.email) || 'entreprise').trim().toLowerCase();
+      const cleanCliEmail = (clientEmail || 'client').trim().toLowerCase();
+      const convId = `conv_${evalId || 'direct'}_${cleanEntEmail}_${cleanCliEmail}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+      const existingConv = allConvs.find(c => c && ((c.evalId && evalId && String(c.evalId) === String(evalId)) || c.id === convId));
+
+      if (existingConv && existingConv.messages && existingConv.messages.length > 0) {
+        // If a discussion has already started for this specific rating, open the chat modal directly!
+        showChatConversationModal(existingConv.id, appState, renderCallback);
+      } else {
+        // If no discussion has started yet for this rating, open the modal to write the first message
+        showContactClientModal({ evalId, clientName, clientEmail, entityName, rating }, appState, renderCallback);
+      }
     });
   });
 
@@ -1536,17 +1698,91 @@ export function attachProfilesEvents(containerEl, appState, renderCallback, onEx
     });
   });
 
-  // --- Messages Reçus discussion clicks (Client side) ---
-  const convItems = containerEl.querySelectorAll('.conversation-card-item');
-  convItems.forEach(item => {
-    item.addEventListener('click', () => {
-      const convId = item.getAttribute('data-conv-id');
-      if (convId) showChatConversationModal(convId, appState, renderCallback);
+  // --- Ouvrir la discussion buttons on each rating card (Free user side) ---
+  const clientChatBtns = containerEl.querySelectorAll('.btn-open-client-chat');
+  clientChatBtns.forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const evalId = btn.getAttribute('data-eval-id') || '';
+      const entityName = btn.getAttribute('data-entity-name') || 'Établissement';
+      const clientName = btn.getAttribute('data-client-name') || (appState.currentUser && appState.currentUser.name) || 'Contributeur';
+      const clientEmail = btn.getAttribute('data-client-email') || (appState.currentUser && appState.currentUser.email) || '';
+
+      let allConvs = [];
+      try {
+        const raw = localStorage.getItem("PERFECT_CONVERSATIONS_V1");
+        if (raw) allConvs = JSON.parse(raw);
+      } catch (err) {}
+
+      const cleanCli = (clientEmail || 'client').trim().toLowerCase();
+      const cleanEnt = entityName.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+      const targetConvId = `conv_${evalId || 'direct'}_${cleanEnt}_${cleanCli}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+      const existingConv = allConvs.find(c => c && ((c.evalId && evalId && String(c.evalId) === String(evalId)) || c.id === targetConvId));
+
+      showChatConversationModal(existingConv ? existingConv.id : targetConvId, appState, renderCallback, {
+        evalId,
+        enterpriseName: entityName,
+        enterpriseEmail: (existingConv && existingConv.enterpriseEmail) || '',
+        clientName,
+        clientEmail
+      });
     });
   });
 
-  // --- Scroll to Messages button from banner ---
+  // --- Toggle show all history items (> 10 items) ---
+  const toggleAllBtn = containerEl.querySelector('#btn-toggle-all-history');
+  if (toggleAllBtn) {
+    let isExpanded = false;
+    toggleAllBtn.addEventListener('click', () => {
+      isExpanded = !isExpanded;
+      toggleAllBtn.setAttribute('data-expanded', isExpanded ? 'true' : 'false');
+      const extraItems = containerEl.querySelectorAll('.history-extra-item');
+      extraItems.forEach(item => {
+        if (isExpanded) {
+          item.style.setProperty('display', 'flex', 'important');
+        } else {
+          item.style.setProperty('display', 'none', 'important');
+        }
+      });
+      const totalCount = toggleAllBtn.getAttribute('data-total-count') || containerEl.querySelectorAll('.recent-rating-item').length;
+      const btnText = toggleAllBtn.querySelector('#toggle-history-text');
+      const btnArrow = toggleAllBtn.querySelector('#toggle-history-arrow');
+      if (btnText) {
+        btnText.textContent = isExpanded 
+          ? 'Afficher moins (10 premières)' 
+          : `Afficher tout (${totalCount} évaluations)`;
+      }
+      if (btnArrow) {
+        btnArrow.textContent = isExpanded ? '▲' : '▼';
+      }
+      if (!isExpanded) {
+        const historyListEl = containerEl.querySelector('#history-items-list');
+        if (historyListEl) historyListEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  }
+
+  // --- Scroll to unread messages button from top alert banner ---
   const scrollBtn = containerEl.querySelector('#btn-scroll-to-messages');
+  if (scrollBtn) {
+    scrollBtn.addEventListener('click', () => {
+      const firstUnread = containerEl.querySelector('.btn-open-client-chat[data-has-unread="true"]');
+      if (firstUnread) {
+        // If it's in the hidden extra items, expand first
+        const parentCard = firstUnread.closest('.history-extra-item');
+        if (parentCard && toggleAllBtn) {
+          toggleAllBtn.click();
+        }
+        firstUnread.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setTimeout(() => firstUnread.click(), 350);
+      } else {
+        const historyListEl = containerEl.querySelector('#history-items-list');
+        if (historyListEl) historyListEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  }
+
   // --- Attach Lightbox to photo attachments ---
   attachLightboxToImages(containerEl);
 }
@@ -1559,7 +1795,7 @@ function showContactClientModal({ evalId, clientName, clientEmail, entityName, r
   const enterpriseName = (currentUser.businessProfile && currentUser.businessProfile.actorName) || currentUser.name || "Mon Établissement";
   const enterpriseEmail = currentUser.email || "contact@entreprise.tn";
 
-  // Check if a conversation thread already exists
+  // Check if a conversation thread already exists STRICTLY for this evaluation ID
   let allConvs = [];
   try {
     const raw = localStorage.getItem("PERFECT_CONVERSATIONS_V1");
@@ -1569,7 +1805,7 @@ function showContactClientModal({ evalId, clientName, clientEmail, entityName, r
   const cleanEntEmail = enterpriseEmail.trim().toLowerCase();
   const cleanCliEmail = (clientEmail || 'client').trim().toLowerCase();
   const convId = `conv_${evalId || 'direct'}_${cleanEntEmail}_${cleanCliEmail}`.replace(/[^a-zA-Z0-9_-]/g, '_');
-  const existingConv = allConvs.find(c => c.id === convId || (c.clientName === clientName && c.enterpriseEmail === enterpriseEmail));
+  const existingConv = allConvs.find(c => c && ((c.evalId && evalId && String(c.evalId) === String(evalId)) || c.id === convId));
 
   const modalOverlay = document.createElement('div');
   modalOverlay.id = 'contact-client-modal';
@@ -1704,16 +1940,13 @@ function showContactClientModal({ evalId, clientName, clientEmail, entityName, r
   });
 }
 
-function showChatConversationModal(convId, appState, renderCallback) {
+export function showChatConversationModal(convId, appState, renderCallback, initialData = null) {
   const oldModal = document.getElementById('chat-conversation-modal');
   if (oldModal) oldModal.remove();
 
   const currentUser = appState.currentUser || {};
   const isBusinessUser = currentUser.role && currentUser.role.toLowerCase().includes('entreprise');
   const activeRole = isBusinessUser ? 'entreprise' : 'contributeur';
-
-  // Mark conversation as read
-  firestoreMarkConversationRead(convId, activeRole);
 
   // Retrieve conversation
   let allConvs = [];
@@ -1722,14 +1955,47 @@ function showChatConversationModal(convId, appState, renderCallback) {
     if (raw) allConvs = JSON.parse(raw);
   } catch (e) {}
 
-  let conv = allConvs.find(c => c.id === convId);
+  let conv = allConvs.find(c => c && (c.id === convId || (c.evalId && initialData && initialData.evalId && String(c.evalId) === String(initialData.evalId))));
+
+  if (!conv && initialData) {
+    conv = {
+      id: convId,
+      evalId: initialData.evalId || '',
+      enterpriseName: initialData.enterpriseName || 'Établissement',
+      enterpriseEmail: initialData.enterpriseEmail || '',
+      clientName: initialData.clientName || 'Contributeur',
+      clientEmail: initialData.clientEmail || '',
+      messages: [],
+      lastMessage: '',
+      lastUpdatedSeconds: Math.floor(Date.now() / 1000),
+      lastUpdatedDisplay: new Date().toLocaleDateString('fr-TN'),
+      unreadForClient: false,
+      unreadForEnterprise: false
+    };
+    allConvs.push(conv);
+    try { localStorage.setItem("PERFECT_CONVERSATIONS_V1", JSON.stringify(allConvs)); } catch (e) {}
+  }
+
   if (!conv) {
     alert("Conversation introuvable.");
     return;
   }
 
+  // Mark conversation as read
+  firestoreMarkConversationRead(conv.id, activeRole);
+
   const otherPartyName = activeRole === 'contributeur' ? (conv.enterpriseName || 'Établissement') : (conv.clientName || 'Contributeur');
   const myName = activeRole === 'contributeur' ? (currentUser.name || 'Moi') : ((currentUser.businessProfile && currentUser.businessProfile.actorName) || currentUser.name || 'Mon Établissement');
+
+  // Contextual information about the evaluation
+  const allEvals = [
+    ...((appState.data && appState.data.recentEvaluations) || []),
+    ...((appState.currentUserEvals) || [])
+  ];
+  const relatedEval = conv.evalId ? allEvals.find(e => e && String(e.id) === String(conv.evalId)) : null;
+  const evalBadgeText = relatedEval 
+    ? `${relatedEval.targetEntity || ''} • Note ${relatedEval.rating ? parseFloat(relatedEval.rating).toFixed(1) + '/5' : ''} • ${relatedEval.mesoSector || relatedEval.sectorName || relatedEval.subSector || relatedEval.sector || ''}`
+    : (conv.evalId ? `Évaluation #${String(conv.evalId).substring(0, 8)}` : 'Échange direct');
 
   const modalOverlay = document.createElement('div');
   modalOverlay.id = 'chat-conversation-modal';
@@ -1763,16 +2029,20 @@ function showChatConversationModal(convId, appState, renderCallback) {
     <div style="background: white; border-radius: 18px; width: 100%; max-width: 460px; height: 85vh; max-height: 600px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);">
       <!-- Chat Header -->
       <div style="padding: 12px 16px; border-bottom: 1px solid #E2E8F0; display: flex; justify-content: space-between; align-items: center; background: #002B49; color: white;">
-        <div style="display: flex; align-items: center; gap: 10px;">
-          <div style="width: 36px; height: 36px; border-radius: 50%; background: #00A859; color: white; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 800;">
+        <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+          <div style="width: 36px; height: 36px; border-radius: 50%; background: #00A859; color: white; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 800; flex-shrink: 0;">
             ${activeRole === 'contributeur' ? '🏢' : '👤'}
           </div>
-          <div>
-            <div style="font-size: 13px; font-weight: 800;">${otherPartyName}</div>
-            <div style="font-size: 9.5px; opacity: 0.8;">Échange en direct • Messagerie interne</div>
+          <div style="min-width: 0;">
+            <div style="font-size: 13px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+              ${otherPartyName}
+            </div>
+            <div style="font-size: 9.5px; color: #93C5FD; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600;">
+              📋 ${evalBadgeText}
+            </div>
           </div>
         </div>
-        <button id="close-chat-modal-btn" style="background: rgba(255,255,255,0.15); border: none; font-size: 14px; color: white; cursor: pointer; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center;">✕</button>
+        <button id="close-chat-modal-btn" style="background: rgba(255,255,255,0.15); border: none; font-size: 14px; color: white; cursor: pointer; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">✕</button>
       </div>
 
       <!-- Chat Messages Scroll Container -->
@@ -2340,14 +2610,14 @@ function showWorkflowStatusModal({ evalId, currentStep, clientName, entityName, 
           console.warn('Could not sync workflow step to Firestore:', err);
         }
 
-        // 2. Update in-memory state
+        // 2. Update in-memory state — match ONLY by exact evalId to avoid corrupting other ratings
         if (appState.data && Array.isArray(appState.data.recentEvaluations)) {
-          const match = appState.data.recentEvaluations.find(e => e.id === evalId || (e.targetEntity === entityName && e.authorName === clientName));
+          const match = appState.data.recentEvaluations.find(e => e.id === evalId);
           if (match) match.workflowStep = selectedStep;
         }
 
         if (Array.isArray(appState.currentUserEvals)) {
-          const match = appState.currentUserEvals.find(e => e.id === evalId || (e.targetEntity === entityName && e.authorName === clientName));
+          const match = appState.currentUserEvals.find(e => e.id === evalId);
           if (match) match.workflowStep = selectedStep;
         }
 

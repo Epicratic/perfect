@@ -2,20 +2,552 @@
 
 import { translations } from './data/translations.js';
 import { initialAppData } from './data/mockData.js';
-import { dbStorage, firestoreSaveEvaluation, firestoreLoadEvaluations, firestoreLoadUserEvaluations, firestoreLoadAllUsers, firestoreLoadUserConversations, firestoreLoadWorkshopRequests, firestoreUpdateWorkshopRequestStatus, firestoreGetUserProfile, firestoreUpdateUserProfile } from './config/firebase.js';
+import { dbStorage, firestoreSaveEvaluation, firestoreLoadEvaluations, firestoreLoadUserEvaluations, firestoreLoadAllUsers, firestoreLoadUserConversations, firestoreLoadWorkshopRequests, firestoreUpdateWorkshopRequestStatus, firestoreGetUserProfile, firestoreUpdateUserProfile, firestoreSaveFcmToken } from './config/firebase.js';
 
 import { renderHeaderHTML, renderBottomNavHTML, attachHeaderMenuEvents } from './components/nav.js';
 import { renderAuthView, attachAuthEvents } from './modules/auth.js';
 import { renderDashboardView, attachDashboardEvents } from './modules/dashboard.js';
 import { renderReportingView, attachReportingEvents } from './modules/reporting.js';
 import { renderAnalyticsView, attachAnalyticsEvents } from './modules/analytics.js';
-import { renderProfilesView, attachProfilesEvents } from './modules/profiles.js';
+import { renderProfilesView, attachProfilesEvents, showChatConversationModal } from './modules/profiles.js';
 import { renderPricingView, attachPricingEvents } from './modules/pricing.js';
 import { renderAdminView, attachAdminEvents } from './modules/admin.js';
 import { renderOnboardingView, attachOnboardingEvents } from './modules/onboarding.js';
 
+// ── Workflow Progression Notification Engine ────────────────────────────────
+const WORKFLOW_STEPS_LABELS = {
+  1: "Demande reçue et enregistrée",
+  2: "Examen et vérification en cours",
+  3: "Plan d'action et mesures correctives engagées",
+  4: "Mise en œuvre des résolutions sur le terrain",
+  5: "Demande traitée et clôturée avec succès"
+};
+
+function showInAppWorkflowNotification(title, body) {
+  const existing = document.getElementById('workflow-notif-banner');
+  if (existing) existing.remove();
+
+  const banner = document.createElement('div');
+  banner.id = 'workflow-notif-banner';
+  banner.style.cssText = `
+    position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+    background: #002B49; color: #FFFFFF; padding: 14px 18px; border-radius: 16px;
+    font-size: 12px; font-weight: 700; z-index: 999999; box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+    border: 1.5px solid #00A859; width: calc(100% - 32px); max-width: 420px;
+    animation: slideDown 0.3s ease; display: flex; align-items: flex-start; gap: 12px;
+  `;
+  banner.innerHTML = `
+    <div style="background: #00A859; color: white; width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; box-shadow: 0 2px 8px rgba(0,168,89,0.4);">
+      🔔
+    </div>
+    <div style="flex: 1;">
+      <div style="font-size: 12px; font-weight: 800; color: #FFFFFF; margin-bottom: 3px;">${title}</div>
+      <div style="font-size: 11px; font-weight: 500; color: #E2E8F0; line-height: 1.4;">${body}</div>
+    </div>
+    <button style="background: transparent; border: none; color: #94A3B8; font-size: 16px; cursor: pointer; padding: 0 4px;" onclick="this.parentElement.remove()">✕</button>
+  `;
+  document.body.appendChild(banner);
+  setTimeout(() => {
+    if (banner && banner.parentElement) {
+      banner.style.opacity = '0';
+      banner.style.transition = 'opacity 0.4s ease';
+      setTimeout(() => banner.remove(), 400);
+    }
+  }, 9000);
+}
+
+export function checkWorkflowStepUpdates(evalsList, userEmail) {
+  if (!evalsList || !userEmail) return;
+  const userEvals = evalsList.filter(e => e && e.authorEmail && e.authorEmail.trim().toLowerCase() === userEmail.trim().toLowerCase());
+  if (userEvals.length === 0) return;
+
+  let knownSteps = {};
+  try {
+    const raw = localStorage.getItem("PERFECT_KNOWN_WORKFLOW_STEPS_V1");
+    if (raw) knownSteps = JSON.parse(raw);
+  } catch (e) {}
+
+  const isFirstTime = Object.keys(knownSteps).length === 0;
+
+  userEvals.forEach(ev => {
+    if (!ev || !ev.id) return;
+    const currentStep = parseInt(ev.workflowStep || 0);
+    const prevStep = knownSteps[ev.id];
+
+    if (!isFirstTime && typeof prevStep === 'number' && currentStep > prevStep && currentStep > 0) {
+      const stepDesc = WORKFLOW_STEPS_LABELS[currentStep] || `Étape ${currentStep}/5`;
+      const entity = ev.targetEntity || 'Établissement';
+      const sub = ev.subSector || ev.mesoSector || ev.sector || '';
+      const kpi = ev.kpi || ev.indicatorType || ev.type || '';
+      const note = ev.rating ? ` (${parseFloat(ev.rating).toFixed(1)}/5)` : '';
+      const meta = sub ? (kpi ? ` • ${sub} - ${kpi}${note}` : ` • ${sub}${note}`) : '';
+
+      const title = `🏛️ ${entity} a mis à jour votre demande`;
+      const body = `Étape ${currentStep}/5 : ${stepDesc}${meta}`;
+
+      // Set highlighted evaluation in state
+      if (window.perfApp && window.perfApp.appState) {
+        window.perfApp.appState.highlightedEvalId = ev.id;
+        if (window.perfApp.appState.activeTab === 'profiles') {
+          window.perfApp.render();
+        }
+      }
+
+      // 1. Android Native System Notification
+      if (window.AndroidNative && typeof window.AndroidNative.showNotification === 'function') {
+        try {
+          window.AndroidNative.showNotification(title, body, JSON.stringify({ evalId: ev.id, step: currentStep, targetEntity: entity }));
+        } catch (e) {
+          console.warn("Android native notification error:", e);
+        }
+      }
+
+      // 2. Web Notification API fallback
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+        try {
+          new Notification(title, { body, icon: './assets/icons/icon-192.png' });
+        } catch (e) {}
+      }
+
+      // 3. In-App Banner
+      showInAppWorkflowNotification(title, body);
+    }
+
+    knownSteps[ev.id] = currentStep;
+  });
+
+  try {
+    localStorage.setItem("PERFECT_KNOWN_WORKFLOW_STEPS_V1", JSON.stringify(knownSteps));
+  } catch (e) {}
+}
+
+// ── Enterprise In-App New Evaluation Notification Engine ──────────────────────
+export function showInAppNewEvaluationNotification(title, body, evalId) {
+  const existing = document.getElementById('new-eval-notif-banner');
+  if (existing) existing.remove();
+
+  const banner = document.createElement('div');
+  banner.id = 'new-eval-notif-banner';
+  banner.style.cssText = `
+    position: fixed;
+    top: 64px;
+    left: 12px;
+    right: 12px;
+    background: linear-gradient(135deg, #002B49 0%, #007A3D 100%);
+    color: #FFFFFF;
+    border-radius: 14px;
+    box-shadow: 0 10px 30px rgba(0, 43, 73, 0.4), 0 0 0 1.5px rgba(0, 168, 89, 0.5);
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    z-index: 999999;
+    cursor: pointer;
+    animation: slideDownInApp 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: opacity 0.3s, transform 0.3s;
+  `;
+
+  banner.innerHTML = `
+    <div style="font-size: 26px; flex-shrink: 0; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">⭐</div>
+    <div style="flex: 1; min-width: 0;">
+      <div style="font-size: 11px; font-weight: 800; color: #86EFAC; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">
+        Nouvelle évaluation reçue
+      </div>
+      <div style="font-size: 12px; font-weight: 700; color: #FFFFFF; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+        ${title}
+      </div>
+      <div style="font-size: 11px; color: #E2E8F0; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+        ${body}
+      </div>
+    </div>
+    <div style="font-size: 18px; opacity: 0.7; padding: 4px; flex-shrink: 0;">✕</div>
+  `;
+
+  banner.addEventListener('click', (e) => {
+    banner.style.opacity = '0';
+    banner.style.transform = 'translateY(-10px)';
+    setTimeout(() => banner.remove(), 300);
+
+    if (e.target && e.target.innerText === '✕') return;
+
+    const app = window.perfApp;
+    if (app) {
+      app.appState.highlightedEvalId = evalId;
+      if (app.appState.activeTab === 'profiles') {
+        app.render();
+      } else {
+        app.navigateTo('profiles');
+      }
+    }
+  });
+
+  document.body.appendChild(banner);
+
+  setTimeout(() => {
+    if (banner && banner.parentElement) {
+      banner.style.opacity = '0';
+      banner.style.transform = 'translateY(-10px)';
+      setTimeout(() => banner.remove(), 300);
+    }
+  }, 8000);
+}
+
+export function checkNewEnterpriseEvaluationUpdates(evalsList, currentUser) {
+  if (!evalsList || !currentUser) return;
+
+  const isEnterprise = Boolean(currentUser.businessProfile) || (currentUser.role && currentUser.role.toLowerCase().includes('entreprise'));
+  if (!isEnterprise) return;
+
+  const bProfile = currentUser.businessProfile || {};
+  const entName = (bProfile.actorName || currentUser.name || '').trim();
+  const entEmail = (currentUser.email || '').trim().toLowerCase();
+  if (!entName && !entEmail) return;
+
+  const normStr = (s) => !s ? '' : String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'').trim();
+  const targetNorm = normStr(entName);
+
+  const targetedEvals = evalsList.filter(e => {
+    if (!e) return false;
+    if (e.authorEmail && e.authorEmail.trim().toLowerCase() === entEmail) return false;
+
+    const eEntEmail = (e.enterpriseEmail || '').trim().toLowerCase();
+    if (entEmail && eEntEmail && eEntEmail === entEmail) return true;
+
+    const eTarget = normStr(e.targetEntity || e.actorName || e.entity || '');
+    return eTarget && targetNorm && (eTarget === targetNorm || eTarget.includes(targetNorm) || targetNorm.includes(eTarget));
+  });
+
+  const storageKey = `PERFECT_KNOWN_PRO_EVALS_${entEmail || targetNorm}`;
+  let knownEvals = {};
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (raw) knownEvals = JSON.parse(raw);
+  } catch (e) {}
+
+  const isFirstTime = Object.keys(knownEvals).length === 0;
+
+  targetedEvals.forEach(ev => {
+    if (!ev || !ev.id) return;
+    const isNew = !knownEvals[ev.id];
+
+    if (!isFirstTime && isNew) {
+      const author = ev.authorName || ev.author || 'Un contributeur';
+      const ratingNum = parseFloat(ev.rating) || 0;
+      const sector = ev.subSector || ev.mesoSector || ev.sectorName || ev.sector || 'Gouvernance';
+      const kpi = ev.kpi || ev.indicatorType || ev.type || '';
+      const kpiText = kpi ? ` • ${kpi}` : '';
+      const shortComment = (ev.comment && ev.comment.trim())
+        ? `"${ev.comment.trim().substring(0, 70)}${ev.comment.length > 70 ? '...' : ''}"`
+        : 'Évaluation partagée.';
+
+      const title = `⭐ Nouvelle évaluation reçue de ${author}`;
+      const body = `Note : ${ratingNum.toFixed(1)}/5 • ${sector}${kpiText} — ${shortComment}`;
+
+      if (window.perfApp && window.perfApp.appState) {
+        window.perfApp.appState.highlightedEvalId = ev.id;
+        if (window.perfApp.appState.activeTab === 'profiles') {
+          window.perfApp.render();
+        }
+      }
+
+      if (window.AndroidNative && typeof window.AndroidNative.showNotification === 'function') {
+        try {
+          window.AndroidNative.showNotification(title, body, JSON.stringify({ type: 'new_eval', evalId: ev.id, authorName: author }));
+        } catch (e) {
+          console.warn("Android native notification error:", e);
+        }
+      }
+
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+        try {
+          new Notification(title, { body, icon: './assets/icons/icon-192.png' });
+        } catch (e) {}
+      }
+
+      showInAppNewEvaluationNotification(title, body, ev.id);
+    }
+
+    knownEvals[ev.id] = true;
+  });
+
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(knownEvals));
+  } catch (e) {}
+}
+
+// ── Real-Time Messaging Notification Engine ──────────────────────────────────
+export function showInAppMessageNotification(title, body, convId) {
+  const existing = document.getElementById('message-notif-banner');
+  if (existing) existing.remove();
+
+  const banner = document.createElement('div');
+  banner.id = 'message-notif-banner';
+  banner.style.cssText = `
+    position: fixed;
+    top: 64px;
+    left: 12px;
+    right: 12px;
+    background: linear-gradient(135deg, #002B49 0%, #1E3A8A 100%);
+    color: #FFFFFF;
+    border-radius: 14px;
+    box-shadow: 0 10px 30px rgba(0, 43, 73, 0.4), 0 0 0 1.5px rgba(59, 130, 246, 0.5);
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    z-index: 999999;
+    cursor: pointer;
+    animation: slideDownInApp 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: opacity 0.3s, transform 0.3s;
+  `;
+
+  banner.innerHTML = `
+    <div style="font-size: 26px; flex-shrink: 0; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">💬</div>
+    <div style="flex: 1; min-width: 0;">
+      <div style="font-size: 11px; font-weight: 800; color: #60A5FA; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;">
+        Nouveau message reçu
+      </div>
+      <div style="font-size: 12px; font-weight: 700; color: #FFFFFF; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+        ${title}
+      </div>
+      <div style="font-size: 11px; color: #E2E8F0; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+        ${body}
+      </div>
+    </div>
+    <div style="font-size: 18px; opacity: 0.7; padding: 4px; flex-shrink: 0;">✕</div>
+  `;
+
+  banner.addEventListener('click', (e) => {
+    banner.style.opacity = '0';
+    banner.style.transform = 'translateY(-10px)';
+    setTimeout(() => banner.remove(), 300);
+
+    if (e.target && e.target.innerText === '✕') return;
+
+    const app = window.perfApp;
+    if (app) {
+      if (app.appState.activeTab === 'profiles') {
+        try {
+          showChatConversationModal(convId, app.appState, () => app.render());
+        } catch(err) {
+          app.appState.pendingConvId = convId;
+          app.render();
+        }
+      } else {
+        app.appState.pendingConvId = convId;
+        app.navigateTo('profiles');
+      }
+    }
+  });
+
+  document.body.appendChild(banner);
+
+  setTimeout(() => {
+    if (banner && banner.parentElement) {
+      banner.style.opacity = '0';
+      banner.style.transform = 'translateY(-10px)';
+      setTimeout(() => banner.remove(), 300);
+    }
+  }, 8000);
+}
+
+export function checkNewMessageUpdates(conversations, userEmail, userName, userRole) {
+  if (!conversations || !userEmail) return;
+
+  const storageKey = `PERFECT_NOTIFIED_MSGS_${userEmail.toLowerCase().trim()}`;
+  let notifiedMap = {};
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (raw) notifiedMap = JSON.parse(raw);
+  } catch (e) {}
+
+  const myEmail = userEmail.toLowerCase().trim();
+  const myName = (userName || '').toLowerCase().trim();
+  const isEnterprise = (userRole === 'entreprise');
+
+  conversations.forEach(conv => {
+    if (!conv || !conv.id) return;
+    const convId = conv.id;
+    const lastMsgId = conv.lastMessageId || (conv.messages && conv.messages.length > 0 && conv.messages[conv.messages.length - 1].id) || `${convId}_${conv.lastUpdatedSeconds || 0}`;
+
+    const clientEmail = (conv.clientEmail || '').toLowerCase().trim();
+    const entEmail = (conv.enterpriseEmail || '').toLowerCase().trim();
+    const clientName = (conv.clientName || '').toLowerCase().trim();
+    const entName = (conv.enterpriseName || '').toLowerCase().trim();
+
+    const isClient = (clientEmail === myEmail || (!isEnterprise && clientName && clientName === myName));
+    const isEnt = (entEmail === myEmail || (isEnterprise && entName && entName === myName));
+
+    if (!isClient && !isEnt) return;
+
+    const unread = isClient ? conv.unreadForClient : conv.unreadForEnterprise;
+    const senderRole = conv.lastSenderRole || (conv.messages && conv.messages.length > 0 && conv.messages[conv.messages.length - 1].senderRole) || '';
+
+    const sentByOther = isClient 
+      ? (senderRole === 'entreprise' || (!senderRole && unread)) 
+      : (senderRole === 'contributeur' || (!senderRole && unread));
+
+    // If this specific message ID has already been notified, skip
+    if (notifiedMap[convId] === lastMsgId) return;
+
+    // Check if this is the very first time we see this conversation
+    if (!notifiedMap[convId]) {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const isRecent = Math.abs(nowSec - (conv.lastUpdatedSeconds || 0)) < 1800;
+      if (unread && isRecent && sentByOther) {
+        _dispatchMessageAlert(conv, isClient, convId, lastMsgId, notifiedMap, storageKey);
+      } else {
+        notifiedMap[convId] = lastMsgId;
+        try { localStorage.setItem(storageKey, JSON.stringify(notifiedMap)); } catch (e) {}
+      }
+      return;
+    }
+
+    // Existing conversation has updated with a new message
+    if (sentByOther || unread) {
+      _dispatchMessageAlert(conv, isClient, convId, lastMsgId, notifiedMap, storageKey);
+    } else {
+      notifiedMap[convId] = lastMsgId;
+      try { localStorage.setItem(storageKey, JSON.stringify(notifiedMap)); } catch (e) {}
+    }
+  });
+}
+
+function _dispatchMessageAlert(conv, isClient, convId, lastMsgId, notifiedMap, storageKey) {
+  notifiedMap[convId] = lastMsgId;
+  try { localStorage.setItem(storageKey, JSON.stringify(notifiedMap)); } catch (e) {}
+
+  const partnerName = isClient ? (conv.enterpriseName || 'L\'établissement') : (conv.clientName || 'Un client');
+  const title = isClient ? `💬 ${partnerName} vous a envoyé un message` : `💬 ${partnerName} a répondu à votre message`;
+  const body = conv.lastMessage ? `"${conv.lastMessage}"` : 'Nouveau message reçu';
+
+  // 1. In-App Banner
+  showInAppMessageNotification(title, body, convId);
+
+  // 2. Android Native Notification
+  if (window.AndroidNative && typeof window.AndroidNative.showNotification === 'function') {
+    try {
+      const payload = JSON.stringify({ type: 'message', convId: convId, partnerName: partnerName });
+      window.AndroidNative.showNotification(title, body, payload);
+    } catch (e) {}
+  }
+}
+
+// ── FCM Token Handler ────────────────────────────────────────────────────────
+// Called by Android WebView bridge ~3s after page load with the device's FCM token.
+// We save it to Firestore so Cloud Functions can send push notifications to this device.
+let _fcmSavedForEmail = null;
+window.onFcmTokenReady = function(token) {
+  if (!token) return;
+  try { localStorage.setItem('PERFECT_FCM_TOKEN', token); } catch(e) {}
+  // If a user is already logged in, save immediately
+  const rawSession = localStorage.getItem('PERFECT_ACTIVE_SESSION_V1');
+  if (rawSession) {
+    try {
+      const session = JSON.parse(rawSession);
+      const email = session && session.currentUser && session.currentUser.email;
+      if (email && email !== _fcmSavedForEmail) {
+        _fcmSavedForEmail = email;
+        firestoreSaveFcmToken(email, token).catch(() => {});
+      }
+    } catch(e) {}
+  }
+};
+
+// ── Notification Tap Dispatcher ──────────────────────────────────────────────
+// Called by Android MainActivity whenever a user taps a system notification.
+// Routes to the appropriate view: workflow update (profile highlight) or new message (chat modal).
+window.onNotificationClicked = function(payloadRaw) {
+  console.log('[Notification Clicked]', payloadRaw);
+  let payload = {};
+  if (payloadRaw) {
+    try {
+      payload = typeof payloadRaw === 'string' ? JSON.parse(payloadRaw) : payloadRaw;
+    } catch (e) {
+      console.warn('Failed to parse notification payload:', e);
+    }
+  }
+
+  // Clear notifications & badge from system shade
+  if (window.AndroidNative && typeof window.AndroidNative.clearAllNotifications === 'function') {
+    try { window.AndroidNative.clearAllNotifications(); } catch(e) {}
+  }
+
+  const app = window.perfApp;
+  if (!app) return;
+
+  const notifType = payload.type || 'workflow';
+
+  // ── Message Notification Tap ──────────────────────────────────────────────
+  if (notifType === 'message' && payload.convId) {
+    const convId = payload.convId;
+
+    // Navigate to profiles first, then open the conversation modal once rendered
+    const userEmail = app.appState.currentUser && app.appState.currentUser.email;
+    if (userEmail) {
+      firestoreLoadUserConversations(userEmail).then(convs => {
+        if (convs && convs.length > 0) {
+          const existing = app.appState.data.conversations || [];
+          const merged = new Map();
+          existing.forEach(c => merged.set(c.id, c));
+          convs.forEach(c => merged.set(c.id, c));
+          app.appState.data.conversations = Array.from(merged.values());
+        }
+        // Navigate to profiles
+        app.appState.pendingConvId = convId;
+        app.navigateTo('profiles');
+      }).catch(() => {
+        app.appState.pendingConvId = convId;
+        app.navigateTo('profiles');
+      });
+    } else {
+      app.appState.pendingConvId = convId;
+      app.navigateTo('profiles');
+    }
+    return;
+  }
+
+  // ── Evaluation or Workflow Notification Tap ───────────────────────────────
+  const evalId = payload.evalId || payload.id || null;
+
+  if (evalId) {
+    app.appState.highlightedEvalId = evalId;
+  }
+
+  // If this is a new evaluation received by an enterprise account, ensure enterprise profile is active
+  if (notifType === 'new_eval' && app.appState.currentUser) {
+    const isEnt = Boolean(app.appState.currentUser.businessProfile) || (app.appState.currentUser.role && app.appState.currentUser.role.toLowerCase().includes('entreprise'));
+    if (isEnt) {
+      app.appState.profileType = 'paid';
+    }
+  }
+
+  const userEmail = app.appState.currentUser && app.appState.currentUser.email;
+  const country = app.appState.selectedCountry || 'TN';
+
+  if (userEmail) {
+    Promise.all([
+      firestoreLoadEvaluations(country),
+      firestoreLoadUserEvaluations(userEmail)
+    ]).then(([countryEvals, userEvals]) => {
+      if (countryEvals && countryEvals.length > 0) {
+        app.appState.data.recentEvaluations = countryEvals;
+      }
+      if (userEvals && userEvals.length > 0) {
+        app.appState.currentUserEvals = userEvals;
+      }
+      app.navigateTo('profiles');
+    }).catch(() => {
+      app.navigateTo('profiles');
+    });
+  } else {
+    app.navigateTo('profiles');
+  }
+};
+
 class PerfECTApp {
   constructor() {
+    window.perfApp = this;
     // ── Purge stale mock/local data from previous versions ───────────────────
     // evaluations and topActors must come exclusively from Firestore.
     // Clear any cached values that may have been stored from old mock data.
@@ -47,14 +579,22 @@ class PerfECTApp {
     }
 
     // Load initial or persisted state
+    let savedSession = null;
+    try {
+      const rawSession = localStorage.getItem("PERFECT_ACTIVE_SESSION_V1");
+      if (rawSession) savedSession = JSON.parse(rawSession);
+    } catch (e) {}
+
+    const hasValidSession = !!(savedSession && savedSession.currentUser);
+
     this.appState = {
       lang: 'fr',
-      activeTab: 'login', // Default screen on app open / install
+      activeTab: hasValidSession ? (savedSession.activeTab || 'profiles') : 'login',
       authMode: 'login', // 'login' or 'register'
       selectedCountry: 'TN', // Default country: Tunisie
-      isLoggedIn: false, // Must authenticate first
-      role: 'user',
-      currentUser: null, // Set after login/registration
+      isLoggedIn: hasValidSession,
+      role: (savedSession && savedSession.role) || 'user',
+      currentUser: (savedSession && savedSession.currentUser) || null,
       isAnnualBilling: false,
       data: dbStorage.loadState(initialAppData)
     };
@@ -72,6 +612,91 @@ class PerfECTApp {
   init() {
     this.updateClock();
     setInterval(() => this.updateClock(), 30000);
+
+    // Check for pending notification payload from cold launch via notification tap
+    if (typeof window !== 'undefined' && window.AndroidNative && typeof window.AndroidNative.getPendingNotificationPayload === 'function') {
+      try {
+        const pending = window.AndroidNative.getPendingNotificationPayload();
+        if (pending) {
+          const parsed = JSON.parse(pending);
+          if (parsed && parsed.evalId) {
+            this.appState.highlightedEvalId = parsed.evalId;
+            if (this.appState.isLoggedIn) {
+              this.appState.activeTab = 'profiles';
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    // Request notification permission on Android native wrapper
+    if (typeof window !== 'undefined' && window.AndroidNative && typeof window.AndroidNative.requestNotificationPermission === 'function') {
+      try {
+        window.AndroidNative.requestNotificationPermission();
+      } catch (e) {}
+    }
+
+    // Start native background Firestore listener for instant sleep/background notifications
+    if (this.appState.isLoggedIn && this.appState.currentUser && this.appState.currentUser.email) {
+      const userEmail = this.appState.currentUser.email;
+      const userName = (this.appState.currentUser.businessProfile && this.appState.currentUser.businessProfile.actorName) || this.appState.currentUser.name || '';
+      const userRole = this.appState.currentUser.businessProfile ? 'entreprise' : (this.appState.role || 'contributeur');
+
+      if (window.AndroidNative && typeof window.AndroidNative.startWorkflowMonitoring === 'function') {
+        try {
+          window.AndroidNative.startWorkflowMonitoring(userEmail, userRole, userName);
+        } catch (e) {}
+      }
+
+      // Initial check for unread messages & evaluations immediately on app startup
+      firestoreLoadUserConversations(userEmail).then(convs => {
+        if (convs && convs.length > 0) {
+          checkNewMessageUpdates(convs, userEmail, userName, userRole);
+        }
+      }).catch(() => {});
+
+      firestoreLoadEvaluations(this.appState.selectedCountry || 'TN').then(countryEvals => {
+        if (countryEvals && countryEvals.length > 0) {
+          this.appState.data.recentEvaluations = countryEvals;
+          checkWorkflowStepUpdates(countryEvals, userEmail);
+          checkNewEnterpriseEvaluationUpdates(countryEvals, this.appState.currentUser);
+        }
+      }).catch(() => {});
+    }
+
+    // Periodic check for incoming messages (every 10s for fast in-app responsiveness)
+    setInterval(() => {
+      if (this.appState.isLoggedIn && this.appState.currentUser && this.appState.currentUser.email) {
+        const userEmail = this.appState.currentUser.email;
+        const userName = (this.appState.currentUser.businessProfile && this.appState.currentUser.businessProfile.actorName) || this.appState.currentUser.name || '';
+        const userRole = this.appState.currentUser.businessProfile ? 'entreprise' : (this.appState.role || 'contributeur');
+        firestoreLoadUserConversations(userEmail).then(convs => {
+          if (convs && convs.length > 0) {
+            const existing = this.appState.data.conversations || [];
+            const merged = new Map();
+            existing.forEach(c => merged.set(c.id, c));
+            convs.forEach(c => merged.set(c.id, c));
+            this.appState.data.conversations = Array.from(merged.values());
+            checkNewMessageUpdates(convs, userEmail, userName, userRole);
+          }
+        }).catch(() => {});
+      }
+    }, 10000);
+
+    // Periodic background check for workflow updates & notifications (every 25s)
+    setInterval(() => {
+      if (this.appState.isLoggedIn && this.appState.currentUser && this.appState.currentUser.email) {
+        const userEmail = this.appState.currentUser.email;
+        const selectedCountry = this.appState.selectedCountry || 'TN';
+        firestoreLoadEvaluations(selectedCountry).then(countryEvals => {
+          if (countryEvals && countryEvals.length > 0) {
+            this.appState.data.recentEvaluations = countryEvals;
+            checkWorkflowStepUpdates(countryEvals, userEmail);
+            checkNewEnterpriseEvaluationUpdates(countryEvals, this.appState.currentUser);
+          }
+        }).catch(() => {});
+      }
+    }, 25000);
 
     // Desktop Screen Switcher Listener
     if (this.desktopSelect) {
@@ -112,6 +737,16 @@ class PerfECTApp {
     this.appState.activeTab = tabId;
     if (this.desktopSelect) this.desktopSelect.value = tabId;
 
+    if (this.appState.isLoggedIn && this.appState.currentUser) {
+      try {
+        localStorage.setItem("PERFECT_ACTIVE_SESSION_V1", JSON.stringify({
+          currentUser: this.appState.currentUser,
+          role: this.appState.role,
+          activeTab: tabId
+        }));
+      } catch (e) {}
+    }
+
     const screenNames = {
       login: "Connexion / Auth",
       dashboard: "Tableau Général",
@@ -147,6 +782,11 @@ class PerfECTApp {
     // Attach Header Menu & Modals Events
     attachHeaderMenuEvents(this.headerMount, this.appState.currentUser || null);
 
+    // Bug 3 fix: clear notification badge whenever user is actively navigating the app
+    if (this.appState.isLoggedIn && window.AndroidNative && typeof window.AndroidNative.clearAllNotifications === 'function') {
+      try { window.AndroidNative.clearAllNotifications(); } catch(e) {}
+    }
+
     // Header Language Select Event
     const langSelect = this.headerMount.querySelector('#header-lang-select');
     if (langSelect) {
@@ -168,10 +808,18 @@ class PerfECTApp {
         this.bodyMount.innerHTML = bodyHTML;
         attachAuthEvents(this.bodyMount, 
           (userPayload) => {
-          // Store the full logged-in user object in appState
+            // Store the full logged-in user object in appState
             this.appState.isLoggedIn = true;
             this.appState.role = (typeof userPayload === 'string') ? userPayload : (userPayload.role || 'contributeur');
             this.appState.currentUser = (typeof userPayload === 'object') ? userPayload : null;
+
+            try {
+              localStorage.setItem("PERFECT_ACTIVE_SESSION_V1", JSON.stringify({
+                currentUser: this.appState.currentUser,
+                role: this.appState.role,
+                activeTab: 'profiles'
+              }));
+            } catch (e) {}
 
             // Add newly registered user to adminStats.contributors if not already present
             if (this.appState.currentUser && this.appState.data && this.appState.data.adminStats) {
@@ -187,11 +835,30 @@ class PerfECTApp {
             const userEmail = this.appState.currentUser && this.appState.currentUser.email;
             const selectedCountry = (this.appState.data && this.appState.data.selectedCountry) || 'Tunisia';
 
+            // Save FCM token to Firestore for this user (enables Cloud Function push notifications)
+            if (userEmail && userEmail !== _fcmSavedForEmail) {
+              const storedToken = localStorage.getItem('PERFECT_FCM_TOKEN');
+              if (storedToken) {
+                _fcmSavedForEmail = userEmail;
+                firestoreSaveFcmToken(userEmail, storedToken).catch(() => {});
+              }
+            }
+
+            // Start native background Firestore listener for real-time sleep/background alerts
+            const curUserName = (this.appState.currentUser && ((this.appState.currentUser.businessProfile && this.appState.currentUser.businessProfile.actorName) || this.appState.currentUser.name)) || '';
+            const curUserRole = (this.appState.currentUser && this.appState.currentUser.businessProfile) ? 'entreprise' : (this.appState.role || 'contributeur');
+
+            if (userEmail && window.AndroidNative && typeof window.AndroidNative.startWorkflowMonitoring === 'function') {
+              try {
+                window.AndroidNative.startWorkflowMonitoring(userEmail, curUserRole, curUserName);
+              } catch (e) {}
+            }
+
             Promise.all([
               firestoreLoadEvaluations(selectedCountry),
               userEmail ? firestoreLoadUserEvaluations(userEmail) : Promise.resolve([]),
               userEmail ? firestoreLoadUserConversations(userEmail).catch(() => []) : Promise.resolve([])
-            ]).then(([countryEvals, userEvals]) => {
+            ]).then(([countryEvals, userEvals, userConvs]) => {
               if (countryEvals && countryEvals.length > 0) {
                 this.appState.data.recentEvaluations = countryEvals;
               } else {
@@ -199,6 +866,19 @@ class PerfECTApp {
                 this.appState.data.recentEvaluations = [];
               }
               this.appState.currentUserEvals = userEvals || [];
+              if (userEmail) {
+                const combined = [...(countryEvals || []), ...(userEvals || [])];
+                checkWorkflowStepUpdates(combined, userEmail);
+                checkNewEnterpriseEvaluationUpdates(combined, this.appState.currentUser);
+                if (userConvs && userConvs.length > 0) {
+                  const existing = this.appState.data.conversations || [];
+                  const merged = new Map();
+                  existing.forEach(c => merged.set(c.id, c));
+                  userConvs.forEach(c => merged.set(c.id, c));
+                  this.appState.data.conversations = Array.from(merged.values());
+                  checkNewMessageUpdates(userConvs, userEmail, curUserName, curUserRole);
+                }
+              }
               this.render();
             }).catch(err => {
               console.warn('Could not load evaluations from Firestore:', err);
@@ -281,6 +961,25 @@ class PerfECTApp {
         attachReportingEvents(this.bodyMount, this.appState, translations, (newEval) => {
           // Save ONLY to Firestore — do NOT call dbStorage.addEvaluation to prevent duplicate records
           const targetCountry = (newEval && newEval.country) ? newEval.country : (this.appState.data.selectedCountry || "Tunisia");
+
+          // If the evaluated entity matches a registered enterprise, attach enterpriseEmail & enterpriseName
+          try {
+            const normTarget = (newEval.targetEntity || newEval.actorName || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
+            if (normTarget) {
+              const allUsers = this.appState.allUsers || (this.appState.data && this.appState.data.allUsers) || (this.appState.data && this.appState.data.adminStats && this.appState.data.adminStats.contributors) || [];
+              const matched = allUsers.find(u => {
+                if (!u) return false;
+                const uActor = (u.businessProfile && u.businessProfile.actorName) || u.name || '';
+                const normU = uActor.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
+                return normU === normTarget || normU.includes(normTarget) || normTarget.includes(normU);
+              });
+              if (matched && matched.email) {
+                newEval.enterpriseEmail = matched.email.trim().toLowerCase();
+                newEval.enterpriseName = (matched.businessProfile && matched.businessProfile.actorName) || matched.name || newEval.targetEntity;
+              }
+            }
+          } catch (e) {}
+
           firestoreSaveEvaluation(newEval).then(evalId => {
             console.log("Evaluation synced to Firestore with ID:", evalId);
             // Reload canonical list from Firestore (this is the single source of truth)
@@ -356,6 +1055,14 @@ class PerfECTApp {
             (targetTab) => this.navigateTo(targetTab),
             // onLogout
             () => {
+              if (window.AndroidNative && typeof window.AndroidNative.stopWorkflowMonitoring === 'function') {
+                try {
+                  window.AndroidNative.stopWorkflowMonitoring();
+                } catch (e) {}
+              }
+              try {
+                localStorage.removeItem("PERFECT_ACTIVE_SESSION_V1");
+              } catch (e) {}
               this.appState.isLoggedIn = false;
               this.appState.currentUser = null;
               this.appState.role = 'user';
@@ -393,7 +1100,38 @@ class PerfECTApp {
           }).catch(() => {}));
         }
 
-        Promise.all(promises).then(() => _doRenderProfile()).catch(() => _doRenderProfile());
+        Promise.all(promises).then(() => {
+          if (profileUserEmail) {
+            const allEvals = [...(this.appState.data.recentEvaluations || []), ...(this.appState.currentUserEvals || [])];
+            checkWorkflowStepUpdates(allEvals, profileUserEmail);
+            checkNewEnterpriseEvaluationUpdates(allEvals, this.appState.currentUser);
+          }
+          _doRenderProfile();
+
+          // If arriving from a message notification tap, auto-open the corresponding conversation
+          const pendingConvId = this.appState.pendingConvId;
+          if (pendingConvId) {
+            this.appState.pendingConvId = null;
+            setTimeout(() => {
+              try {
+                showChatConversationModal(pendingConvId, this.appState, () => this.render());
+              } catch (e) {
+                console.warn('Could not auto-open conversation modal:', e);
+              }
+            }, 350);
+          }
+        }).catch(() => {
+          _doRenderProfile();
+          const pendingConvId = this.appState.pendingConvId;
+          if (pendingConvId) {
+            this.appState.pendingConvId = null;
+            setTimeout(() => {
+              try {
+                showChatConversationModal(pendingConvId, this.appState, () => this.render());
+              } catch (e) {}
+            }, 350);
+          }
+        });
         break;
       }
 

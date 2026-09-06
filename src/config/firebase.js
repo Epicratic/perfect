@@ -261,7 +261,9 @@ export async function firestoreLoadEvaluations(country) {
         photoUrl: d.photoUrl || d.attachmentBase64 || null,
         workflowStep: parseInt(d.workflowStep || d.step || 0),
         workflowUpdatedBy: d.workflowUpdatedBy || '',
-        workflowUpdatedAt: d.workflowUpdatedAt || null
+        workflowUpdatedAt: d.workflowUpdatedAt || null,
+        enterpriseEmail: d.enterpriseEmail || '',
+        enterpriseName: d.enterpriseName || ''
       });
     });
     console.log(`Loaded ${evals.length} total evaluations from Firestore.`);
@@ -344,7 +346,9 @@ export async function firestoreLoadUserEvaluations(userEmail, userName = '') {
         photoUrl: d.photoUrl || d.attachmentBase64 || null,
         workflowStep: parseInt(d.workflowStep || d.step || 0),
         workflowUpdatedBy: d.workflowUpdatedBy || '',
-        workflowUpdatedAt: d.workflowUpdatedAt || null
+        workflowUpdatedAt: d.workflowUpdatedAt || null,
+        enterpriseEmail: d.enterpriseEmail || '',
+        enterpriseName: d.enterpriseName || ''
       });
     });
     console.log(`Loaded ${evals.length} evaluations for ${userEmail} from Firestore.`);
@@ -365,7 +369,7 @@ export async function firestoreUpdateEvaluationWorkflow(evalId, workflowStep, up
   if (!modules) { console.warn('[WF] Firebase modules not available'); return false; }
   const { db } = modules;
 
-  if (!db._setDoc || !db._doc || !db._getDocs || !db._collection) {
+  if (!db._setDoc || !db._doc) {
     console.warn('[WF] Required Firestore functions not cached on db');
     return false;
   }
@@ -376,61 +380,24 @@ export async function firestoreUpdateEvaluationWorkflow(evalId, workflowStep, up
     workflowUpdatedAt: new Date().toISOString()
   };
 
-  let updated = false;
-
-  // ── Step 1: Direct update by evalId (if it's a real Firestore doc ID) ──
+  // ── Direct update by evalId (the only safe strategy) ─────────────────────
+  // Bug fix: The previous "scan + name-match" fallback was updating ALL evaluations
+  // from the same author/entity pair. We now update ONLY the exact document.
   const isSyntheticId = !evalId || evalId.startsWith('ent-eval-') || evalId.startsWith('uh-') || evalId.startsWith('eval-');
-  if (!isSyntheticId) {
-    try {
-      const docRef = db._doc(db, 'evaluations', evalId);
-      await db._setDoc(docRef, updateData, { merge: true });
-      console.log(`[WF] Direct setDoc OK → doc ${evalId} workflowStep=${stepNum}`);
-      updated = true;
-    } catch (err) {
-      console.warn(`[WF] Direct setDoc failed for ${evalId}:`, String(err));
-    }
+  if (isSyntheticId) {
+    console.warn(`[WF] evalId "${evalId}" appears synthetic — cannot safely update Firestore. Skipping to avoid data corruption.`);
+    return false;
   }
 
-  // ── Step 2: Fallback – scan collection and match by entity/author ──
-  // This handles cases where evalId is synthetic or direct update failed.
   try {
-    const norm = (s) => !s ? '' : String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
-    const tNorm = norm(targetEntity);
-    const cNorm = norm(clientName);
-
-    const colRef = db._collection(db, 'evaluations');
-    const snapshot = await db._getDocs(colRef);
-
-    const updatePromises = [];
-    snapshot.forEach(docSnap => {
-      const d = docSnap.data();
-      const dTarget = norm(d.targetEntity || d.actorName || d.entity || '');
-      const dAuthor = norm(d.authorName || d.author || '');
-
-      const isExactId = docSnap.id === evalId;
-      const isEntityMatch = tNorm && dTarget && (dTarget === tNorm || dTarget.includes(tNorm) || tNorm.includes(dTarget));
-      const isAuthorMatch = !cNorm || (dAuthor && (dAuthor === cNorm || dAuthor.includes(cNorm) || cNorm.includes(dAuthor)));
-
-      if (isExactId || (isEntityMatch && isAuthorMatch)) {
-        const ref = db._doc(db, 'evaluations', docSnap.id);
-        updatePromises.push(
-          db._setDoc(ref, updateData, { merge: true })
-            .then(() => { console.log(`[WF] Fallback setDoc OK → doc ${docSnap.id} workflowStep=${stepNum}`); updated = true; })
-            .catch(e => console.warn(`[WF] Fallback setDoc failed for ${docSnap.id}:`, String(e)))
-        );
-      }
-    });
-
-    if (updatePromises.length > 0) {
-      await Promise.all(updatePromises);
-    } else if (!updated) {
-      console.warn(`[WF] No matching Firestore doc found for evalId=${evalId} entity=${targetEntity} author=${clientName}`);
-    }
-  } catch (scanErr) {
-    console.warn('[WF] Collection scan error:', String(scanErr));
+    const docRef = db._doc(db, 'evaluations', evalId);
+    await db._setDoc(docRef, updateData, { merge: true });
+    console.log(`[WF] setDoc OK → doc ${evalId} workflowStep=${stepNum}`);
+    return true;
+  } catch (err) {
+    console.warn(`[WF] setDoc failed for ${evalId}:`, String(err));
+    return false;
   }
-
-  return updated;
 }
 
 
@@ -574,6 +541,11 @@ export async function firestoreSendMessage({ evalId, enterpriseName, enterpriseE
     existing.messages = existing.messages || [];
     existing.messages.push(newMsg);
     existing.lastMessage = text;
+    existing.lastMessageId = newMsg.id;
+    existing.lastSenderRole = senderRole;
+    existing.lastSenderName = senderName;
+    existing.enterpriseEmail = cleanEntEmail;
+    existing.clientEmail = cleanCliEmail;
     existing.lastUpdatedSeconds = seconds;
     existing.lastUpdatedDisplay = dateDisplay;
     if (senderRole === 'entreprise') existing.unreadForClient = true;
@@ -583,11 +555,14 @@ export async function firestoreSendMessage({ evalId, enterpriseName, enterpriseE
       id: convId,
       evalId: evalId || '',
       enterpriseName: enterpriseName || 'Établissement',
-      enterpriseEmail: enterpriseEmail || '',
+      enterpriseEmail: cleanEntEmail,
       clientName: clientName || 'Client',
-      clientEmail: clientEmail || '',
+      clientEmail: cleanCliEmail,
       messages: [newMsg],
       lastMessage: text,
+      lastMessageId: newMsg.id,
+      lastSenderRole: senderRole,
+      lastSenderName: senderName,
       lastUpdatedSeconds: seconds,
       lastUpdatedDisplay: dateDisplay,
       unreadForClient: senderRole === 'entreprise',
@@ -917,3 +892,29 @@ class StorageEngine {
 }
 
 export const dbStorage = new StorageEngine();
+
+/**
+ * Save a device FCM registration token to Firestore for the given user.
+ * Stored under users/{email}/fcmTokens as an array to support multiple devices.
+ * Called from main.js after login and whenever the token is refreshed.
+ */
+export async function firestoreSaveFcmToken(userEmail, token) {
+  if (!userEmail || !token) return;
+  const modules = await getFirebaseModules();
+  if (!modules) return;
+  const { db } = modules;
+  if (!db._setDoc || !db._doc) return;
+
+  try {
+    // Store token keyed by itself to prevent duplicates (Firestore map semantics)
+    const tokenDocRef = db._doc(db, 'fcmTokens', userEmail.toLowerCase().trim());
+    await db._setDoc(tokenDocRef, {
+      email: userEmail.toLowerCase().trim(),
+      tokens: { [token]: new Date().toISOString() },
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+    console.log('[FCM] Token saved for', userEmail);
+  } catch (e) {
+    console.warn('[FCM] Failed to save token:', String(e));
+  }
+}
