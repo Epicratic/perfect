@@ -3,6 +3,7 @@ import { firestoreUpdateUserProfile, dbStorage, firestoreSendMessage, firestoreL
 import { getRadarScoresFromEvals } from './analytics.js';
 import { compressImageFile } from '../utils/imageCompressor.js';
 import { attachLightboxToImages } from '../utils/imageLightbox.js';
+import { renderAuthorAvatarHTML, renderAuthorVerifiedBadgeHTML } from '../utils/avatarHelper.js';
 
 function getEnterpriseProfileRadarScores(historyEvals) {
   const normStr = (s) => !s ? '' : String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'').trim();
@@ -146,6 +147,44 @@ export function renderProfilesView(appState, translations) {
   const sectorCounts = {};
 
   userEvals.forEach(e => {
+    // A. Territorial evaluations cover all 7 sectors via macroScores
+    if (e.isTerritoryRating && e.macroScores) {
+      let ms = e.macroScores;
+      if (typeof ms === 'string') {
+        try { ms = JSON.parse(ms); } catch (_) {}
+      }
+      if (ms) {
+        sectorMapKeys.forEach(s => {
+          const val = ms[s.key];
+          if (val !== undefined && val !== null) {
+            sectorTotals[s.key] = (sectorTotals[s.key] || 0) + (parseFloat(val) || 0);
+            sectorCounts[s.key] = (sectorCounts[s.key] || 0) + 1;
+          }
+        });
+        return;
+      }
+    }
+    // Fallback from indicatorsData
+    if (e.isTerritoryRating && e.indicatorsData) {
+      let indArr = e._parsedIndicators;
+      if (!indArr) {
+        try { indArr = typeof e.indicatorsData === 'string' ? JSON.parse(e.indicatorsData) : e.indicatorsData; e._parsedIndicators = indArr; } catch (_) {}
+      }
+      if (Array.isArray(indArr) && indArr.length > 0) {
+        sectorMapKeys.forEach(s => {
+          let mTot = 0, mCnt = 0;
+          for (let i = 0; i < indArr.length; i++) {
+            if (indArr[i].m === s.key) { mTot += indArr[i].r; mCnt++; }
+          }
+          if (mCnt > 0) {
+            sectorTotals[s.key] = (sectorTotals[s.key] || 0) + (mTot / mCnt);
+            sectorCounts[s.key] = (sectorCounts[s.key] || 0) + 1;
+          }
+        });
+        return;
+      }
+    }
+    // B. Standard citizen evaluation
     const secStr = String(e.sectorName || e.macroSector || e.sector || '').toLowerCase();
     const matched = sectorMapKeys.find(s =>
       s.key.toLowerCase() === secStr ||
@@ -179,18 +218,28 @@ export function renderProfilesView(appState, translations) {
   if (evalCount >= 1)  earnedBadges.push({ icon: "✍️", label: "Premier Pas", desc: "1ère évaluation publiée", color: "#00A859", earned: true });
 
   // Analyste Sectoriel: requires 5+ DISTINCT sectors evaluated
-  const distinctSectors = new Set(userEvals.map(e => e.sectorName || e.macroSector || e.sector || '').filter(Boolean));
+  const distinctSectors = new Set();
+  userEvals.forEach(e => {
+    if (e.isTerritoryRating) {
+      sectorMapKeys.forEach(s => distinctSectors.add(s.key));
+    } else {
+      const sec = e.sectorName || e.macroSector || e.sector;
+      if (sec) distinctSectors.add(sec);
+    }
+  });
   if (distinctSectors.size >= 5) earnedBadges.push({ icon: "📊", label: "Analyste Sectoriel", desc: "5+ secteurs évalués", color: "#F59E0B", earned: true });
   if (evalCount >= 10) earnedBadges.push({ icon: "🏅", label: "Top Contributeur", desc: "10+ évaluations", color: "#002B49", earned: true });
   if (evalCount >= 50) earnedBadges.push({ icon: "🎓", label: "Évaluateur Expert", desc: "50+ évaluations", color: "#8B5CF6", earned: true });
 
-  // History — real user evals, newest first by Firestore createdAt timestamp
-  const realHistory = userEvals.slice().sort((a, b) => (b.createdAtSeconds || 0) - (a.createdAtSeconds || 0)).map((e, idx) => ({
+  // History — real user evals, newest first by Firestore createdAt timestamp (plafonné à 100 pour fluidité)
+  const realHistory = userEvals.slice().sort((a, b) => (b.createdAtSeconds || 0) - (a.createdAtSeconds || 0)).slice(0, 100).map((e, idx) => ({
     id: e.id || `uh-${idx}`,
     authorName: displayName,
     authorInitials: displayInitials,
     authorAvatarBg: "#002B49",
     authorAvatarColor: "#FFFFFF",
+    authorAvatarUrl: e.authorAvatarUrl || (currentUser && (currentUser.avatarBase64 || currentUser.photoURL)) || null,
+    authorIsVerified: Boolean((currentUser && currentUser.isVerified) || e.authorIsVerified),
     targetEntity: e.targetEntity || e.actorName || e.entity || '—',
     sector: e.sectorName || e.macroSector || e.sector || '—',
     sectorName: e.sectorName || e.macroSector || e.sector || '',
@@ -210,7 +259,7 @@ export function renderProfilesView(appState, translations) {
     comment: e.comment || '',
     workflowStep: parseInt(e.workflowStep || e.step || 0),
     statusLabel: "État de prise en compte de la demande",
-    authorEmail: e.authorEmail || '',
+    authorEmail: e.authorEmail || (currentUser && currentUser.email) || '',
     attachmentName: e.attachmentName || null,
     attachmentBase64: e.attachmentBase64 || e.photoUrl || null,
     photoUrl: e.photoUrl || e.attachmentBase64 || null
@@ -290,6 +339,8 @@ export function renderProfilesView(appState, translations) {
     authorInitials: e.authorInitials || (e.authorName || 'A').substring(0, 2).toUpperCase(),
     authorAvatarBg: e.authorAvatarBg || '#002B49',
     authorAvatarColor: e.authorAvatarColor || '#FFFFFF',
+    authorAvatarUrl: e.authorAvatarUrl || null,
+    authorIsVerified: Boolean(e.authorIsVerified),
     targetEntity: enterpriseActorName,
     sector: e.sectorName || e.macroSector || e.sector || 'Gouvernance',
     sectorName: e.sectorName || e.macroSector || e.sector || '',
@@ -477,9 +528,7 @@ export function renderProfilesView(appState, translations) {
             data-sector="${(item.sectorName || item.macroSector || item.sector || '').replace(/"/g, '&quot;')}"
             data-actor="${(item.targetEntity || '').replace(/"/g, '&quot;')}"
             style="${shouldHide ? 'display: none !important;' : ''} ${isHighlighted ? 'border: 2.5px solid #00A859 !important; box-shadow: 0 0 22px rgba(0, 168, 89, 0.45) !important; background: #F0FDF4 !important; transition: all 0.3s ease; position: relative;' : ''}">
-            <div class="rating-user-avatar-circle" style="background: ${item.authorAvatarBg || '#002B49'}; color: ${item.authorAvatarColor || '#FFFFFF'};">
-              ${item.authorInitials || 'U'}
-            </div>
+            ${renderAuthorAvatarHTML(item, appState, item.authorInitials || 'U', item.authorAvatarBg || '#002B49', item.authorAvatarColor || '#FFFFFF')}
             <div style="flex: 1;">
               ${isHighlighted ? `
                 <div class="highlight-badge-dismiss" style="background: #00A859; color: #FFFFFF; font-size: 10px; font-weight: 800; padding: 6px 10px; border-radius: 8px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 6px rgba(0,168,89,0.3); cursor: pointer;">
@@ -488,8 +537,9 @@ export function renderProfilesView(appState, translations) {
                 </div>
               ` : ''}
               <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
-                <div style="font-size: 12px; font-weight: 700; color: #002B49;">
-                  ${item.authorName || 'Contributeur'} <span style="font-weight: 400; color: #64748B;">a noté</span>
+                <div style="font-size: 12px; font-weight: 700; color: #002B49; display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+                  <span>${item.authorName || 'Contributeur'}</span>${renderAuthorVerifiedBadgeHTML(item, appState)}
+                  <span style="font-weight: 400; color: #64748B; margin-left: 2px;">a noté</span>
                   <span style="color: #00A859; font-weight: 800;">${item.targetEntity || 'Acteur'}</span>
                 </div>
                 <button class="btn-share-facebook"
@@ -645,12 +695,11 @@ export function renderProfilesView(appState, translations) {
                   </div>
                 ` : ''}
                 <div style="display: flex; gap: 10px; align-items: flex-start;">
-                  <div class="rating-user-avatar-circle" style="background: ${item.authorAvatarBg}; color: ${item.authorAvatarColor};">
-                    ${item.authorInitials}
-                  </div>
+                  ${renderAuthorAvatarHTML(item, appState, item.authorInitials || 'C', item.authorAvatarBg || '#002B49', item.authorAvatarColor || '#FFFFFF')}
                   <div style="flex: 1;">
-                    <div style="font-size: 12px; font-weight: 700; color: #002B49;">
-                      ${item.authorName} <span style="font-weight: 400; color: #64748B;">a noté</span>
+                    <div style="font-size: 12px; font-weight: 700; color: #002B49; display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+                      <span>${item.authorName}</span>${renderAuthorVerifiedBadgeHTML(item, appState)}
+                      <span style="font-weight: 400; color: #64748B; margin-left: 2px;">a noté</span>
                       <span style="color: #00A859; font-weight: 800;">${item.targetEntity}</span>
                     </div>
 
@@ -919,6 +968,21 @@ export function renderProfilesView(appState, translations) {
           Se déconnecter
         </button>
       </div>
+
+      <!-- CARD: Descriptif de l'entreprise (Enterprise only) -->
+      ${!isFree ? `
+        <div class="card" style="margin-bottom: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <div class="card-title">🏢 Descriptif de l'entreprise</div>
+            <a href="#" id="link-edit-description" style="font-size: 11px; font-weight: 700; color: #002B49; text-decoration: underline; white-space: nowrap;">
+              ✏️ Modifiez la description
+            </a>
+          </div>
+          <div id="enterprise-description-box" style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 10px; padding: 12px; font-size: 11.5px; color: ${(currentUser.businessProfile && currentUser.businessProfile.description) || currentUser.description ? '#334155' : '#94A3B8'}; line-height: 1.55; min-height: 56px; font-style: ${(currentUser.businessProfile && currentUser.businessProfile.description) || currentUser.description ? 'normal' : 'italic'};">
+            ${(currentUser.businessProfile && currentUser.businessProfile.description) || currentUser.description || 'Aucune description pour le moment. Cliquez sur « Modifiez la description » pour présenter votre établissement.'}
+          </div>
+        </div>
+      ` : ''}
 
       <!-- CARD 2: Statistics Cards (3 Cards) -->
       ${isFree ? `
@@ -1481,6 +1545,15 @@ export function attachProfilesEvents(containerEl, appState, renderCallback, onEx
     });
   }
 
+  // --- Descriptif de l'entreprise (enterprise only) ---
+  const editDescriptionLink = containerEl.querySelector('#link-edit-description');
+  if (editDescriptionLink) {
+    editDescriptionLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      showEditDescriptionModal(appState, renderCallback);
+    });
+  }
+
   // --- Sector bar chart (free profile) --- score-based colors ---
   if (isFree) {
     const canvas = containerEl.querySelector('#profile-sector-bar-chart');
@@ -1495,7 +1568,24 @@ export function attachProfilesEvents(containerEl, appState, renderCallback, onEx
         }
 
         // Recompute sector scores from appState directly (freeUserData is out of scope here)
-        const userEvals = appState.currentUserEvals || [];
+        const currentUser = appState.currentUser || null;
+        const normEmail = (currentUser && currentUser.email ? currentUser.email : '').toLowerCase().trim();
+        const normName = (currentUser && currentUser.name ? currentUser.name : '').toLowerCase().trim();
+        const userEvalsMap = new Map();
+        (appState.currentUserEvals || []).forEach(e => {
+          if (e) userEvalsMap.set(e.id || `${e.targetEntity}-${e.rating}`, e);
+        });
+        ((appState.data && appState.data.recentEvaluations) || []).forEach(e => {
+          if (e) {
+            const eEmail = (e.authorEmail || '').toLowerCase().trim();
+            const eName = (e.authorName || e.author || '').toLowerCase().trim();
+            if ((normEmail && eEmail === normEmail) || (normName && eName === normName)) {
+              userEvalsMap.set(e.id || `${e.targetEntity}-${e.rating}`, e);
+            }
+          }
+        });
+        const userEvals = Array.from(userEvalsMap.values());
+
         const sectorMapKeys = [
           { key: "Governance",         label: "Gouvernance",           keywords: ["gouv", "gov", "just", "parl"] },
           { key: "SecurityDefense",    label: "Séc. & Défense",        keywords: ["séc", "secu", "def", "polic", "gend"] },
@@ -1508,6 +1598,44 @@ export function attachProfilesEvents(containerEl, appState, renderCallback, onEx
 
         const totals = {}, counts = {};
         userEvals.forEach(e => {
+          // A. Territorial evaluations cover all 7 sectors via macroScores
+          if (e.isTerritoryRating && e.macroScores) {
+            let ms = e.macroScores;
+            if (typeof ms === 'string') {
+              try { ms = JSON.parse(ms); } catch (_) {}
+            }
+            if (ms) {
+              sectorMapKeys.forEach(sk => {
+                const val = ms[sk.key];
+                if (val !== undefined && val !== null) {
+                  totals[sk.key] = (totals[sk.key] || 0) + (parseFloat(val) || 0);
+                  counts[sk.key] = (counts[sk.key] || 0) + 1;
+                }
+              });
+              return;
+            }
+          }
+          // Fallback from indicatorsData
+          if (e.isTerritoryRating && e.indicatorsData) {
+            let indArr = e._parsedIndicators;
+            if (!indArr) {
+              try { indArr = typeof e.indicatorsData === 'string' ? JSON.parse(e.indicatorsData) : e.indicatorsData; e._parsedIndicators = indArr; } catch (_) {}
+            }
+            if (Array.isArray(indArr) && indArr.length > 0) {
+              sectorMapKeys.forEach(sk => {
+                let mTot = 0, mCnt = 0;
+                for (let i = 0; i < indArr.length; i++) {
+                  if (indArr[i].m === sk.key) { mTot += indArr[i].r; mCnt++; }
+                }
+                if (mCnt > 0) {
+                  totals[sk.key] = (totals[sk.key] || 0) + (mTot / mCnt);
+                  counts[sk.key] = (counts[sk.key] || 0) + 1;
+                }
+              });
+              return;
+            }
+          }
+          // B. Standard citizen evaluation
           const s = String(e.sectorName || e.macroSector || e.sector || '').toLowerCase();
           const matched = sectorMapKeys.find(sk =>
             sk.key.toLowerCase() === s ||
@@ -1730,35 +1858,46 @@ export function attachProfilesEvents(containerEl, appState, renderCallback, onEx
     });
   });
 
-  // --- Toggle show all history items (> 10 items) ---
+  // --- Toggle show more history items (+50 progressively) ---
   const toggleAllBtn = containerEl.querySelector('#btn-toggle-all-history');
   if (toggleAllBtn) {
-    let isExpanded = false;
     toggleAllBtn.addEventListener('click', () => {
-      isExpanded = !isExpanded;
-      toggleAllBtn.setAttribute('data-expanded', isExpanded ? 'true' : 'false');
-      const extraItems = containerEl.querySelectorAll('.history-extra-item');
-      extraItems.forEach(item => {
-        if (isExpanded) {
-          item.style.setProperty('display', 'flex', 'important');
-        } else {
+      const isAllShown = toggleAllBtn.getAttribute('data-all-shown') === 'true';
+      const extraItems = Array.from(containerEl.querySelectorAll('.history-extra-item'));
+      
+      if (isAllShown) {
+        // Collapse back to 10 items
+        extraItems.forEach(item => {
           item.style.setProperty('display', 'none', 'important');
-        }
-      });
-      const totalCount = toggleAllBtn.getAttribute('data-total-count') || containerEl.querySelectorAll('.recent-rating-item').length;
-      const btnText = toggleAllBtn.querySelector('#toggle-history-text');
-      const btnArrow = toggleAllBtn.querySelector('#toggle-history-arrow');
-      if (btnText) {
-        btnText.textContent = isExpanded 
-          ? 'Afficher moins (10 premières)' 
-          : `Afficher tout (${totalCount} évaluations)`;
-      }
-      if (btnArrow) {
-        btnArrow.textContent = isExpanded ? '▲' : '▼';
-      }
-      if (!isExpanded) {
+        });
+        toggleAllBtn.setAttribute('data-all-shown', 'false');
+        const btnText = toggleAllBtn.querySelector('#toggle-history-text');
+        const btnArrow = toggleAllBtn.querySelector('#toggle-history-arrow');
+        if (btnText) btnText.textContent = `Afficher plus (+50)`;
+        if (btnArrow) btnArrow.textContent = '▼';
         const historyListEl = containerEl.querySelector('#history-items-list');
         if (historyListEl) historyListEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+
+      // Find currently hidden items
+      const hiddenItems = extraItems.filter(item => item.style.display === 'none' || item.style.getPropertyValue('display') === 'none');
+      const toReveal = hiddenItems.slice(0, 50);
+      toReveal.forEach(item => {
+        item.style.setProperty('display', 'flex', 'important');
+      });
+
+      const remainingHidden = extraItems.filter(item => item.style.display === 'none' || item.style.getPropertyValue('display') === 'none');
+      const btnText = toggleAllBtn.querySelector('#toggle-history-text');
+      const btnArrow = toggleAllBtn.querySelector('#toggle-history-arrow');
+
+      if (remainingHidden.length > 0) {
+        if (btnText) btnText.textContent = `Afficher plus (+50) — ${remainingHidden.length} restantes`;
+        if (btnArrow) btnArrow.textContent = '▼';
+      } else {
+        toggleAllBtn.setAttribute('data-all-shown', 'true');
+        if (btnText) btnText.textContent = 'Réduire aux 10 premières';
+        if (btnArrow) btnArrow.textContent = '▲';
       }
     });
   }
@@ -2223,6 +2362,91 @@ function showEditProfileModal(appState, renderCallback) {
 
     if (appState.data) {
       dbStorage.saveState(appState.data);
+    }
+
+    closeModal();
+    if (renderCallback) renderCallback();
+  });
+}
+
+// ─── Edit Enterprise Description Modal ─────────────────────────────────────────
+function showEditDescriptionModal(appState, renderCallback) {
+  const oldModal = document.getElementById('edit-description-modal');
+  if (oldModal) oldModal.remove();
+
+  const currentDesc =
+    (appState.currentUser.businessProfile && appState.currentUser.businessProfile.description) ||
+    appState.currentUser.description || '';
+
+  const modalOverlay = document.createElement('div');
+  modalOverlay.id = 'edit-description-modal';
+  modalOverlay.style.cssText = `
+    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+    background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(8px);
+    z-index: 9999; display: flex; align-items: center; justify-content: center;
+    padding: 20px; animation: fadeIn 0.3s ease;
+  `;
+
+  modalOverlay.innerHTML = `
+    <div style="background: white; border-radius: 20px; padding: 24px 20px; width: 100%; max-width: 380px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3 style="font-size: 15px; font-weight: 800; color: #002B49;">🏢 Descriptif de l'entreprise</h3>
+        <button id="close-edit-desc-btn" style="background: none; border: none; font-size: 18px; cursor: pointer; color: #64748B;">✕</button>
+      </div>
+      <p style="font-size: 11px; color: #64748B; margin-bottom: 10px; line-height: 1.5;">
+        Rédigez un court paragraphe présentant votre établissement, vos services ou vos valeurs. Ce texte sera visible par les utilisateurs qui consulteront votre fiche.
+      </p>
+      <textarea id="desc-textarea" rows="6" placeholder="Ex : Notre établissement est spécialisé dans…" style="width: 100%; box-sizing: border-box; border: 1.5px solid #CBD5E1; border-radius: 12px; padding: 12px; font-size: 12px; color: #334155; line-height: 1.55; resize: vertical; outline: none; font-family: inherit;">${currentDesc}</textarea>
+      <div style="margin-top: 14px; display: flex; gap: 10px; justify-content: flex-end;">
+        <button id="cancel-edit-desc-btn" style="padding: 9px 18px; border-radius: 10px; border: 1.5px solid #CBD5E1; background: white; color: #64748B; font-size: 12px; font-weight: 600; cursor: pointer;">Annuler</button>
+        <button id="save-edit-desc-btn" style="padding: 9px 18px; border-radius: 10px; border: none; background: #002B49; color: white; font-size: 12px; font-weight: 700; cursor: pointer;">✅ Enregistrer</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modalOverlay);
+
+  const textarea = modalOverlay.querySelector('#desc-textarea');
+  textarea.focus();
+  textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+
+  const closeModal = () => { modalOverlay.remove(); };
+
+  modalOverlay.querySelector('#close-edit-desc-btn').addEventListener('click', closeModal);
+  modalOverlay.querySelector('#cancel-edit-desc-btn').addEventListener('click', closeModal);
+  modalOverlay.addEventListener('click', (e) => { if (e.target === modalOverlay) closeModal(); });
+
+  modalOverlay.querySelector('#save-edit-desc-btn').addEventListener('click', async () => {
+    const newDesc = textarea.value.trim();
+    const uid = appState.currentUser && appState.currentUser.uid;
+    if (!uid) { closeModal(); return; }
+
+    // Update in-memory currentUser
+    if (!appState.currentUser.businessProfile) appState.currentUser.businessProfile = {};
+    appState.currentUser.businessProfile.description = newDesc;
+    appState.currentUser.description = newDesc;
+
+    // Also patch appState.allUsers cache so radar modal immediately reflects the new text
+    if (Array.isArray(appState.allUsers)) {
+      const cachedUser = appState.allUsers.find(u => u.uid === uid || u.id === uid);
+      if (cachedUser) {
+        if (!cachedUser.businessProfile) cachedUser.businessProfile = {};
+        cachedUser.businessProfile.description = newDesc;
+        cachedUser.description = newDesc;
+      }
+    }
+    // Force fresh reload of allUsers on next dashboard visit
+    appState.allUsersLoaded = false;
+
+    // Persist to Firestore — build proper nested object (setDoc+merge doesn't support dot-notation)
+    try {
+      const existingBP = appState.currentUser.businessProfile || {};
+      await firestoreUpdateUserProfile(uid, {
+        businessProfile: { ...existingBP, description: newDesc },
+        description: newDesc
+      });
+    } catch (err) {
+      console.warn('[EditDesc] Firestore save failed:', err);
     }
 
     closeModal();

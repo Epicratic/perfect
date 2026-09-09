@@ -660,6 +660,19 @@ class PerfECTApp {
           this.appState.data.recentEvaluations = countryEvals;
           checkWorkflowStepUpdates(countryEvals, userEmail);
           checkNewEnterpriseEvaluationUpdates(countryEvals, this.appState.currentUser);
+          if (this.appState.activeTab === 'dashboard' || this.appState.activeTab === 'analytics') {
+            this.render();
+          }
+        }
+      }).catch(() => {});
+
+      firestoreLoadAllUsers().then(users => {
+        if (users && users.length > 0) {
+          this.appState.allUsers = users;
+          this.appState.allUsersLoaded = true;
+          if (this.appState.activeTab === 'dashboard' || this.appState.activeTab === 'analytics' || this.appState.activeTab === 'profiles') {
+            this.render();
+          }
         }
       }).catch(() => {});
     }
@@ -682,21 +695,6 @@ class PerfECTApp {
         }).catch(() => {});
       }
     }, 10000);
-
-    // Periodic background check for workflow updates & notifications (every 25s)
-    setInterval(() => {
-      if (this.appState.isLoggedIn && this.appState.currentUser && this.appState.currentUser.email) {
-        const userEmail = this.appState.currentUser.email;
-        const selectedCountry = this.appState.selectedCountry || 'TN';
-        firestoreLoadEvaluations(selectedCountry).then(countryEvals => {
-          if (countryEvals && countryEvals.length > 0) {
-            this.appState.data.recentEvaluations = countryEvals;
-            checkWorkflowStepUpdates(countryEvals, userEmail);
-            checkNewEnterpriseEvaluationUpdates(countryEvals, this.appState.currentUser);
-          }
-        }).catch(() => {});
-      }
-    }, 25000);
 
     // Desktop Screen Switcher Listener
     if (this.desktopSelect) {
@@ -737,6 +735,15 @@ class PerfECTApp {
     this.appState.activeTab = tabId;
     if (this.desktopSelect) this.desktopSelect.value = tabId;
 
+    // Scroll to top on page change, unless this is a notification deep-link
+    if (!this.appState.pendingConvId && !this.appState.highlightedEvalId) {
+      try {
+        const bodyMount = document.getElementById('app-body-mount') || document.querySelector('.app-body');
+        if (bodyMount) bodyMount.scrollTop = 0;
+        window.scrollTo(0, 0);
+      } catch(e) {}
+    }
+
     if (this.appState.isLoggedIn && this.appState.currentUser) {
       try {
         localStorage.setItem("PERFECT_ACTIVE_SESSION_V1", JSON.stringify({
@@ -759,6 +766,28 @@ class PerfECTApp {
 
     if (this.screenNameTag) {
       this.screenNameTag.textContent = screenNames[tabId] || tabId;
+    }
+
+    // Fetch fresh evaluations on page change (throttled to 15s to avoid redundant reads)
+    if (this.appState.isLoggedIn && (tabId === 'dashboard' || tabId === 'analytics' || tabId === 'profiles')) {
+      const now = Date.now();
+      if (!this._lastNavFetchTime || (now - this._lastNavFetchTime) > 15000) {
+        this._lastNavFetchTime = now;
+        const selectedCountry = this.appState.selectedCountry || 'TN';
+        const userEmail = this.appState.currentUser ? this.appState.currentUser.email : null;
+        firestoreLoadEvaluations(selectedCountry).then(countryEvals => {
+          if (countryEvals && countryEvals.length > 0) {
+            this.appState.data.recentEvaluations = countryEvals;
+            if (userEmail) {
+              checkWorkflowStepUpdates(countryEvals, userEmail);
+              checkNewEnterpriseEvaluationUpdates(countryEvals, this.appState.currentUser);
+            }
+            if (this.appState.activeTab === tabId) {
+              this.render();
+            }
+          }
+        }).catch(() => {});
+      }
     }
 
     this.render();
@@ -857,8 +886,13 @@ class PerfECTApp {
             Promise.all([
               firestoreLoadEvaluations(selectedCountry),
               userEmail ? firestoreLoadUserEvaluations(userEmail) : Promise.resolve([]),
-              userEmail ? firestoreLoadUserConversations(userEmail).catch(() => []) : Promise.resolve([])
-            ]).then(([countryEvals, userEvals, userConvs]) => {
+              userEmail ? firestoreLoadUserConversations(userEmail).catch(() => []) : Promise.resolve([]),
+              firestoreLoadAllUsers()
+            ]).then(([countryEvals, userEvals, userConvs, allUsers]) => {
+              if (allUsers && allUsers.length > 0) {
+                this.appState.allUsers = allUsers;
+                this.appState.allUsersLoaded = true;
+              }
               if (countryEvals && countryEvals.length > 0) {
                 this.appState.data.recentEvaluations = countryEvals;
               } else {
@@ -1009,6 +1043,17 @@ class PerfECTApp {
       case 'analytics':
         bodyHTML = renderAnalyticsView(this.appState, translations);
         this.bodyMount.innerHTML = bodyHTML;
+        if (!this.appState.allUsersLoaded) {
+          firestoreLoadAllUsers().then(users => {
+            if (users && users.length > 0) {
+              this.appState.allUsers = users;
+              this.appState.allUsersLoaded = true;
+              if (this.appState.activeTab === 'analytics') {
+                this.render();
+              }
+            }
+          }).catch(() => {});
+        }
         attachAnalyticsEvents(this.bodyMount, this.appState, () => this.render());
         break;
 
@@ -1078,6 +1123,15 @@ class PerfECTApp {
             this.appState.data.recentEvaluations = countryEvals;
           }
         }).catch(() => {}));
+
+        if (!this.appState.allUsersLoaded) {
+          promises.push(firestoreLoadAllUsers().then(users => {
+            if (users && users.length > 0) {
+              this.appState.allUsers = users;
+              this.appState.allUsersLoaded = true;
+            }
+          }).catch(() => {}));
+        }
 
         if (profileUserEmail) {
           promises.push(firestoreLoadUserEvaluations(profileUserEmail).then(userEvals => {

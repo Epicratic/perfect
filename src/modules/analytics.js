@@ -7,6 +7,7 @@ import { sectorData } from '../data/sectors.js';
 import { initialAppData } from '../data/mockData.js';
 import { translations } from '../data/translations.js';
 import { attachLightboxToImages } from '../utils/imageLightbox.js';
+import { renderAuthorAvatarHTML, renderAuthorVerifiedBadgeHTML } from '../utils/avatarHelper.js';
 
 // ─── Module-level helper: build HTML for a single evaluation card item ───────
 const indicatorNamesMap = {
@@ -21,7 +22,7 @@ const indicatorNamesMap = {
   'Resilience': 'Résilience aux catastrophes'
 };
 
-function buildEvalItemHTML(rev) {
+function buildEvalItemHTML(rev, appState) {
   const sectorLabel = rev.sectorName || rev.macroSector || rev.sector || '';
   const subSectorLabel = rev.mesoSector || rev.subSector || '';
   const perfLabel = rev.pillar || rev.societalPillar || '';
@@ -44,12 +45,11 @@ function buildEvalItemHTML(rev) {
 
   return `
   <div class="recent-rating-item">
-    <div class="rating-user-avatar-circle" style="background: ${rev.authorAvatarBg || '#002B49'}; color: ${rev.authorAvatarColor || '#FFFFFF'};">
-      ${rev.authorInitials || 'U'}
-    </div>
+    ${renderAuthorAvatarHTML(rev, appState, rev.authorInitials || 'U', rev.authorAvatarBg || '#002B49', rev.authorAvatarColor || '#FFFFFF')}
     <div style="flex: 1;">
-      <div style="font-size: 12px; font-weight: 700; color: #002B49;">
-        ${rev.authorName || 'Contributeur'} <span style="font-weight: 400; color: #64748B;">a noté</span>
+      <div style="font-size: 12px; font-weight: 700; color: #002B49; display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+        <span>${rev.authorName || 'Contributeur'}</span>${renderAuthorVerifiedBadgeHTML(rev, appState)}
+        <span style="font-weight: 400; color: #64748B; margin-left: 2px;">a noté</span>
         <span style="color: #00A859; font-weight: 800;">${rev.targetEntity || rev.actorName || rev.entity || 'Acteur'}</span>
       </div>
 
@@ -114,6 +114,75 @@ function buildEvalItemHTML(rev) {
   `;
 }
 
+// ─── Module-level helper: meso-sector keywords and aliases (supports canonical IDs + NDPI variants) ───
+export const mesoSectorKeywords = {
+  // Governance
+  Parlement: ['parlement', 'legislatif', 'législatif', 'parl', 'depute', 'assemblee', 'parliament', 'مجلس', 'برلمان'],
+  Gouvernement: ['gouvernement', 'executif', 'exécutif', 'gouv', 'gov', 'minist', 'cabinet', 'premier', 'government', 'حكومة', 'وزارة'],
+  Justice: ['justice', 'judiciaire', 'just', 'tribunal', 'tribun', 'juge', 'cour', 'magistrat', 'avocat', 'عدالة', 'محكمة'],
+
+  // Security & Defense
+  Police: ['police', 'polic', 'surete', 'sûreté', 'surete_nationale', 'sûreté_nationale', 'commissariat', 'poste de police', 'dgsn', 'securite publique', 'شرطة', 'أمن'],
+  Gendarmerie: ['gendarmerie', 'gend', 'garde nationale', 'garde_nationale', 'garde', 'حرس'],
+  Pompiers: ['pompier', 'pompiers', 'protection civile', 'protection_civile', 'incendie', 'firefighter', 'حماية مدنية', 'إطفاء'],
+  ArmeeTerre: ['armeeterre', 'armee de terre', 'armée de terre', 'armee_de_terre', 'armee', 'milit', 'terre', 'army', 'جيش بري'],
+  MarineNationale: ['marinenationale', 'marine nationale', 'marine_nationale', 'marine', 'mer', 'cotiere', 'navy', 'بحرية'],
+  ArmeeAir: ['armeeair', 'armee de lair', 'armée de l\'air', 'armee de l\'air', 'armee_de_lair', 'air', 'aviation', 'force aerienne', 'air force', 'طيران'],
+
+  // Health & Hygiene
+  Medecine: ['medecine', 'medecin', 'médecine', 'médecin', 'med', 'hopital', 'hôpital', 'hopit', 'clinique', 'dispensaire', 'docteur', 'urgenc', 'soin', 'sante', 'santé', 'cabinet medical', 'polyclinique', 'centre de sante', 'chu', 'طب', 'مستشفى', 'عيادة', 'صحة'],
+  Pharmacie: ['pharmacie', 'pharm', 'medicament', 'médicament', 'officine', 'drugstore', 'صيدلة', 'دواء'],
+  Biologie: ['biologie', 'bio', 'laboratoire', 'analyse', 'labo', 'تحاليل', 'مخبر'],
+  GestionDechets: ['gestiondechet', 'gestion des dechets', 'gestion des déchets', 'dechet', 'déchet', 'ordur', 'poubelle', 'collecte', 'recyclage', 'waste', 'proprete', 'propreté', 'نفايات', 'قمامة'],
+  Assainissement: ['assainissement', 'assainnissement', 'onass', 'egout', 'égout', 'eau usee', 'eau usée', 'sanitation', 'تطهير'],
+  ProtectionEnvironnement: ['protectionenvironnement', 'protection de lenvironnement', 'protection de l\'environnement', 'protection_environnementale', 'protection environnementale', 'environnement', 'environnementale', 'ecologie', 'écologie', 'foret', 'forêt', 'anpe', 'dpm', 'parc', 'بيئة'],
+
+  // Instruction & Culture
+  Education: ['education', 'éducation', 'educ', 'éduc', 'ecole', 'école', 'lycee', 'lycée', 'college', 'collège', 'primaire', 'secondaire', 'scolaire', 'تعليم', 'مدرسة'],
+  EnseignementSuperieur: ['enseignementsuperieur', 'enseignement superieur', 'enseignement supérieur', 'enseignement_recherche', 'recherche', 'superieur', 'supérieur', 'universite', 'université', 'univ', 'faculte', 'faculté', 'fac', 'institut', 'campus', 'جامعة', 'كلية'],
+  FormationProfessionnelle: ['formationprofessionnelle', 'formation professionnelle', 'formation_professionnelle', 'formation', 'apprentissage', 'metier', 'métier', 'centre de formation', 'تكوين مهني'],
+  Arts: ['arts', 'art', 'theatre', 'théâtre', 'cinema', 'cinéma', 'musee', 'musée', 'galerie', 'exposition', 'culture', 'فنون', 'مسرح', 'سينما', 'متحف'],
+  Sports: ['sports', 'sport', 'stade', 'complexe', 'piscine', 'gymnase', 'club', 'رياضة', 'ملعب'],
+  Cultes: ['cultes', 'culte', 'mosquee', 'mosquée', 'eglise', 'église', 'synagogue', 'religieux', 'شؤون دينية', 'جامع', 'مسجد'],
+
+  // Food & Finance
+  Agriculture: ['agriculture', 'agri', 'ferme', 'recolte', 'récolte', 'peche', 'pêche', 'elevage', 'élevage', 'فلاحة', 'زراعة', 'صيد'],
+  Industrie: ['industrie', 'indus', 'usine', 'fabrique', 'manufacture', 'agroalimentaire', 'صناعة', 'معمل'],
+  Commerce: ['commerce', 'comm', 'marche', 'marché', 'magasin', 'supermarche', 'supermarché', 'boutique', 'grossiste', 'تجارة', 'سوق', 'محل'],
+  Banque: ['banque', 'banq', 'bank', 'credit', 'crédit', 'agence bancaire', 'atm', 'distributeur', 'بنك', 'مصرف'],
+  Bourse: ['bourse', 'bvmt', 'marche financier', 'marché financier', 'action', 'titre', 'بورصة'],
+  Assurance: ['assurance', 'assur', 'compagnie dassurance', 'compagnie d\'assurance', 'sinistre', 'تأمين'],
+
+  // Housing & Tourism (matching sectors.js IDs + aliases)
+  Amenagement: ['amenagement', 'aménagement', 'territoire', 'urbanisme', 'cadastre', 'voirie', 'municipalite', 'municipalité', 'تهيئة ترابية', 'بلدية'],
+  Equipement: ['equipement', 'équipement', 'public', 'infrastructure', 'eclairage', 'éclairage', 'espace vert', 'jardin', 'تجهيزات عمومية', 'حديقة'],
+  Immobilier: ['immobilier', 'immo', 'habitat', 'logement', 'log', 'residence', 'résidence', 'foyer', 'سكن', 'عقار'],
+  Hotels: ['hotel', 'hôtel', 'hotels', 'hôtels', 'hotellerie', 'hôtellerie', 'resort', 'chambre', 'فندقة', 'فندق'],
+  Auberges: ['auberge', 'auberges', 'hostel', 'نزل'],
+  Campings: ['camping', 'campings', 'campsite', 'مخيمات'],
+  Logement: ['logement', 'log', 'immobilier', 'immo', 'habitat', 'residence', 'résidence', 'foyer', 'سكن', 'عقار'],
+  AmenagementTerritoire: ['amenagement', 'aménagement', 'territoire', 'urbanisme', 'cadastre', 'voirie', 'municipalite', 'municipalité', 'تهيئة ترابية', 'بلدية'],
+  EquipementsPublics: ['equipement', 'équipement', 'public', 'infrastructure', 'eclairage', 'éclairage', 'espace vert', 'jardin', 'تجهيزات عمomية', 'حديقة'],
+  Hotellerie: ['hotellerie', 'hôtellerie', 'hotel', 'hôtel', 'auberge', 'resort', 'chambre', 'فندقة', 'نزل', 'فندق'],
+  Restauration: ['restauration', 'restaurant', 'resto', 'cafe', 'café', 'cafet', 'salon de the', 'salon de thé', 'مطعم', 'مقهى'],
+  AgencesVoyages: ['voyage', 'tourisme', 'tour', 'agence', 'guide', 'excursion', 'travel', 'وكالة أسفار', 'سياحة'],
+
+  // Transport & Telco (matching sectors.js IDs + aliases)
+  Route: ['route', 'rout', 'transport_terrestre', 'transport terrestre', 'terrestre', 'bus', 'taxi', 'louage', 'gare', 'voiture', 'نقل بري', 'حافلة'],
+  CheminDeFer: ['chemindefer', 'chemin de fer', 'train', 'sncft', 'metro', 'métro', 'tramway', 'قطار'],
+  Maritime: ['maritime', 'transport_maritime', 'transport maritime', 'port', 'bateau', 'ferry', 'navire', 'ctn', 'نقل بحري', 'ميناء'],
+  Aerien: ['aerien', 'aérien', 'transport_aerien', 'transport aerien', 'transport aérien', 'aeroport', 'aéroport', 'avion', 'tunisair', 'vol', 'نقل جوي', 'مطار', 'طائرة'],
+  ServicePostal: ['servicepostal', 'service postal', 'service_postal', 'poste', 'post', 'courrier', 'colis', 'facteur', 'bureau de poste', 'بريد'],
+  Telephonie: ['telephonie', 'téléphonie', 'telecom', 'télécom', 'tel', 'tél', 'operateur', 'opérateur', 'mobile', 'fibre', 'tt', 'ooredoo', 'orange', 'اتصالات'],
+  Internet: ['internet', 'media', 'médias', 'web', 'presse', 'radio', 'television', 'télévision', 'tv', 'journal', 'إنترنت', 'إعلام'],
+  TransportTerrestre: ['transportterrestre', 'transport terrestre', 'transport_terrestre', 'terrestre', 'bus', 'train', 'sncft', 'metro', 'métro', 'taxi', 'louage', 'route', 'gare', 'نقل بري', 'حافلة', 'قطار'],
+  TransportMaritime: ['transportmaritime', 'transport maritime', 'transport_maritime', 'maritime', 'port', 'bateau', 'ferry', 'navire', 'ctn', 'نقل بحري', 'ميناء'],
+  TransportAerien: ['transportaerien', 'transport aerien', 'transport aérien', 'transport_aerien', 'aerien', 'aérien', 'aeroport', 'aéroport', 'avion', 'tunisair', 'vol', 'نقل جوي', 'مطار', 'طائرة'],
+  Poste: ['poste', 'post', 'courrier', 'colis', 'facteur', 'bureau de poste', 'service_postal', 'service postal', 'بريد'],
+  Telecommunications: ['telecommunication', 'télécommunication', 'telecom', 'télécom', 'tel', 'tél', 'operateur', 'opérateur', 'telephonie', 'téléphonie', 'mobile', 'fibre', 'tt', 'ooredoo', 'orange', 'اتصالات'],
+  InternetMedias: ['internet', 'media', 'médias', 'web', 'presse', 'radio', 'television', 'télévision', 'tv', 'journal', 'إنترنت', 'إعلام']
+};
+
 // ─── Module-level helper: filter evaluations based on all active appState slicers ───
 export function getFilteredEvaluations(appState) {
   if (!appState) return [];
@@ -129,7 +198,20 @@ export function getFilteredEvaluations(appState) {
   allEvalsData.forEach(e => {
     if (e) {
       const key = e.id || `${e.targetEntity || e.actorName}-${e.rating}-${e.date || ''}-${e.comment || ''}`;
-      evalsMap.set(key, e);
+      if (!evalsMap.has(key)) {
+        evalsMap.set(key, e);
+      } else {
+        const existing = evalsMap.get(key);
+        evalsMap.set(key, {
+          ...existing,
+          ...e,
+          macroScores: existing.macroScores || e.macroScores,
+          indicatorsData: existing.indicatorsData || e.indicatorsData,
+          pillarScores: existing.pillarScores || e.pillarScores,
+          categoryScores: existing.categoryScores || e.categoryScores,
+          isTerritoryRating: existing.isTerritoryRating || e.isTerritoryRating
+        });
+      }
     }
   });
   const evals = Array.from(evalsMap.values());
@@ -178,29 +260,36 @@ export function getFilteredEvaluations(appState) {
 
     // 3. Macro-Sector filter
     if (selectedMacro && selectedMacro !== 'ALL') {
-      const eMacro = normStr(rev.macroSector || rev.sectorName || rev.sector || '');
-      const sMacro = normStr(selectedMacro);
-      const keywords = sectorKeywords[selectedMacro] || [sMacro];
-      const matchesMacro = (eMacro && (eMacro.includes(sMacro) || sMacro.includes(eMacro))) ||
-                           keywords.some(k => eMacro.includes(k));
-      if (!matchesMacro) return false;
+      // NDPI docs span all macro-sectors — keep them regardless of macroSector field
+      if (!(rev.isTerritoryRating && rev.macroScores)) {
+        const eMacro = normStr(rev.macroSector || rev.sectorName || rev.sector || '');
+        const sMacro = normStr(selectedMacro);
+        const keywords = sectorKeywords[selectedMacro] || [sMacro];
+        const matchesMacro = (eMacro && (eMacro.includes(sMacro) || sMacro.includes(eMacro))) ||
+                             keywords.some(k => eMacro.includes(k));
+        if (!matchesMacro) return false;
+      }
     }
 
     // 4. Meso-Sector (Sous-secteur) filter
     if (selectedMeso && selectedMeso !== 'ALL') {
       const eMeso = normStr(rev.mesoSector || rev.subSector || '');
       const sMeso = normStr(selectedMeso);
-      if (!eMeso || (!eMeso.includes(sMeso) && !sMeso.includes(eMeso))) {
-        return false;
-      }
+      const allowedKeywords = (mesoSectorKeywords[selectedMeso] || [selectedMeso]).map(normStr).filter(k => k.length >= 3);
+      const matchesMeso = eMeso === sMeso || eMeso.includes(sMeso) || sMeso.includes(eMeso) ||
+                          allowedKeywords.some(k => eMeso === k || (k.length >= 4 && (eMeso.includes(k) || k.includes(eMeso))));
+      if (!matchesMeso) return false;
     }
 
     // 5. Pillar filter
     if (selectedPillar && selectedPillar !== 'ALL') {
-      const pNorm = normStr(rev.pillar || rev.societalPillar || '');
-      if (selectedPillar === 'Economic' && !pNorm.includes('econ')) return false;
-      if (selectedPillar === 'Social' && !pNorm.includes('soc')) return false;
-      if (selectedPillar === 'Environmental' && !pNorm.includes('env')) return false;
+      // NDPI docs span all pillars — keep them regardless of pillar field
+      if (!(rev.isTerritoryRating && rev.macroScores)) {
+        const pNorm = normStr(rev.pillar || rev.societalPillar || '');
+        if (selectedPillar === 'Economic' && !pNorm.includes('econ')) return false;
+        if (selectedPillar === 'Social' && !pNorm.includes('soc')) return false;
+        if (selectedPillar === 'Environmental' && !pNorm.includes('env')) return false;
+      }
     }
 
     // 6. Category (Indicator) filter
@@ -337,8 +426,33 @@ export function getRadarScoresFromEvals(actorName, appState) {
       const sum = evalsToUse.reduce((s, e) => s + (parseFloat(e.rating) || 0), 0);
       return parseFloat((sum / evalsToUse.length).toFixed(1));
     } else {
-      // When ALL actors are selected (Territory scale), check if authorized expert territory ratings exist.
-      // If an authorized expert rating exists for this territory KPI, it BYPASSES operator averages!
+      // When ALL actors are selected (Territory scale):
+      // Check if NDPI docs have pre-computed category scores for this axis
+      const ndpiScores = [];
+      filtered.forEach(e => {
+        if (e.isTerritoryRating) {
+          if (e.categoryScores && e.categoryScores[categoryKey] !== undefined) {
+            ndpiScores.push(e.categoryScores[categoryKey]);
+          } else if (e.indicatorsData) {
+            try {
+              const arr = typeof e.indicatorsData === 'string' ? JSON.parse(e.indicatorsData) : e.indicatorsData;
+              if (Array.isArray(arr)) {
+                let tot = 0, cnt = 0;
+                for (let i = 0; i < arr.length; i++) {
+                  if (arr[i].c === categoryKey) { tot += arr[i].r; cnt++; }
+                }
+                if (cnt > 0) ndpiScores.push(tot / cnt);
+              }
+            } catch (_) {}
+          }
+        }
+      });
+      if (ndpiScores.length > 0) {
+        const sum = ndpiScores.reduce((a, b) => a + b, 0);
+        return parseFloat((sum / ndpiScores.length).toFixed(1));
+      }
+
+      // Fallback for regular evals
       const baseEvals = catEvals.length > 0 ? catEvals : pillarEvals;
       if (baseEvals.length === 0) return 0.0;
       const expertEvals = baseEvals.filter(e => e.isTerritoryRating || e.isExpertRating);
@@ -488,7 +602,7 @@ export function renderAnalyticsView(appState, translations) {
 
     const displayEvals = getFilteredEvaluations(appState);
     const recentRatingsHTML = displayEvals.length > 0
-      ? displayEvals.slice(0, 10).map(buildEvalItemHTML).join('')
+      ? displayEvals.slice(0, 10).map(rev => buildEvalItemHTML(rev, appState)).join('')
       : `<div style="text-align: center; padding: 24px 16px; color: #64748B; font-size: 11.5px; font-weight: 500;">
            ℹ️ Aucune évaluation ne correspond aux critères sélectionnés.
          </div>`;
@@ -842,61 +956,6 @@ export function renderAnalyticsView(appState, translations) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: compute all filter-dependent card data from appState
 // ─────────────────────────────────────────────────────────────────────────────
-// ─── Module-level helper: compute state and curves for analytics view ───────
-const mesoSectorKeywords = {
-  // Governance
-  Parlement: ['parlement', 'parl', 'depute', 'assemblee', 'parliament', 'مجلس', 'برلمان'],
-  Gouvernement: ['gouvernement', 'gouv', 'gov', 'minist', 'cabinet', 'premier', 'government', 'حكومة', 'وزارة'],
-  Justice: ['justice', 'just', 'tribunal', 'tribun', 'juge', 'cour', 'magistrat', 'avocat', 'عدالة', 'محكمة'],
-
-  // Security & Defense
-  Police: ['police', 'polic', 'commissariat', 'poste de police', 'شرطة', 'أمن'],
-  Gendarmerie: ['gendarmerie', 'gend', 'garde nationale', 'garde', 'حرس'],
-  Pompiers: ['pompier', 'pompiers', 'protection civile', 'incendie', 'firefighter', 'حماية مدنية', 'إطفاء'],
-  ArmeeTerre: ['armeeterre', 'armee de terre', 'armee', 'milit', 'terre', 'army', 'جيش بري'],
-  MarineNationale: ['marinenationale', 'marine', 'mer', 'cotiere', 'navy', 'بحرية'],
-  ArmeeAir: ['armeeair', 'armee de lair', 'air', 'aviation', 'force aerienne', 'air force', 'طيران'],
-
-  // Health & Hygiene
-  Medecine: ['medecine', 'medecin', 'médecine', 'médecin', 'med', 'hopital', 'hôpital', 'hopit', 'clinique', 'dispensaire', 'docteur', 'urgenc', 'soin', 'sante', 'santé', 'cabinet medical', 'polyclinique', 'centre de sante', 'chu', 'طب', 'مستشفى', 'عيادة', 'صحة'],
-  Pharmacie: ['pharmacie', 'pharm', 'medicament', 'médicament', 'officine', 'drugstore', 'صيدلة', 'دواء'],
-  Biologie: ['biologie', 'bio', 'laboratoire', 'analyse', 'labo', 'تحاليل', 'مخبر'],
-  GestionDechets: ['gestiondechet', 'gestion des dechets', 'gestion des déchets', 'dechet', 'déchet', 'ordur', 'poubelle', 'collecte', 'recyclage', 'waste', 'proprete', 'propreté', 'نفايات', 'قمامة'],
-  Assainissement: ['assainissement', 'onass', 'egout', 'égout', 'eau usee', 'eau usée', 'sanitation', 'تطهير'],
-  ProtectionEnvironnement: ['protectionenvironnement', 'protection de lenvironnement', 'protection de l\'environnement', 'environnement', 'ecologie', 'écologie', 'foret', 'forêt', 'anpe', 'dpm', 'parc', 'بيئة'],
-
-  // Instruction & Culture
-  Education: ['education', 'éducation', 'educ', 'éduc', 'ecole', 'école', 'lycee', 'lycée', 'college', 'collège', 'primaire', 'secondaire', 'scolaire', 'تعليم', 'مدرسة'],
-  EnseignementSuperieur: ['enseignementsuperieur', 'enseignement superieur', 'enseignement supérieur', 'superieur', 'supérieur', 'universite', 'université', 'univ', 'faculte', 'faculté', 'fac', 'institut', 'campus', 'جامعة', 'كلية'],
-  FormationProfessionnelle: ['formationprofessionnelle', 'formation professionnelle', 'formation', 'apprentissage', 'metier', 'métier', 'centre de formation', 'تكوين مهني'],
-  Arts: ['arts', 'art', 'theatre', 'théâtre', 'cinema', 'cinéma', 'musee', 'musée', 'galerie', 'exposition', 'culture', 'فنون', 'مسرح', 'سينما', 'متحف'],
-  Sports: ['sports', 'sport', 'stade', 'complexe', 'piscine', 'gymnase', 'club', 'رياضة', 'ملعب'],
-  Cultes: ['cultes', 'culte', 'mosquee', 'mosquée', 'eglise', 'église', 'synagogue', 'religieux', 'شؤون دينية', 'جامع', 'مسجد'],
-
-  // Food & Finance
-  Agriculture: ['agriculture', 'agri', 'ferme', 'recolte', 'récolte', 'peche', 'pêche', 'elevage', 'élevage', 'فلاحة', 'زراعة', 'صيد'],
-  Industrie: ['industrie', 'indus', 'usine', 'fabrique', 'manufacture', 'agroalimentaire', 'صناعة', 'معمل'],
-  Commerce: ['commerce', 'comm', 'marche', 'marché', 'magasin', 'supermarche', 'supermarché', 'boutique', 'grossiste', 'تجارة', 'سوق', 'محل'],
-  Banque: ['banque', 'banq', 'bank', 'credit', 'crédit', 'agence bancaire', 'atm', 'distributeur', 'بنك', 'مصرف'],
-  Bourse: ['bourse', 'bvmt', 'marche financier', 'marché financier', 'action', 'titre', 'بورصة'],
-  Assurance: ['assurance', 'assur', 'compagnie dassurance', 'compagnie d\'assurance', 'sinistre', 'تأمين'],
-
-  // Housing & Tourism
-  Logement: ['logement', 'log', 'immobilier', 'immo', 'residence', 'résidence', 'habitat', 'foyer', 'سكن', 'عقار'],
-  AmenagementTerritoire: ['amenagement', 'aménagement', 'territoire', 'urbanisme', 'cadastre', 'voirie', 'municipalite', 'municipalité', 'تهيئة ترابية', 'بلدية'],
-  EquipementsPublics: ['equipement', 'équipement', 'public', 'infrastructure', 'eclairage', 'éclairage', 'espace vert', 'jardin', 'تجهيزات عمومية', 'حديقة'],
-  Hotellerie: ['hotellerie', 'hôtellerie', 'hotel', 'hôtel', 'auberge', 'resort', 'chambre', 'فندقة', 'نزل', 'فندق'],
-  Restauration: ['restauration', 'restaurant', 'resto', 'cafe', 'café', 'cafet', 'salon de the', 'salon de thé', 'مطعم', 'مقهى'],
-  AgencesVoyages: ['voyage', 'tourisme', 'tour', 'agence', 'guide', 'excursion', 'travel', 'وكالة أسفar', 'سياحة'],
-
-  // Transport & Telco
-  TransportTerrestre: ['transportterrestre', 'transport terrestre', 'terrestre', 'bus', 'train', 'sncft', 'metro', 'métro', 'taxi', 'louage', 'route', 'gare', 'نقل بري', 'حافلة', 'قطار'],
-  TransportMaritime: ['transportmaritime', 'transport maritime', 'maritime', 'port', 'bateau', 'ferry', 'navire', 'ctn', 'نقل بحري', 'ميناء'],
-  TransportAerien: ['transportaerien', 'transport aerien', 'transport aérien', 'aerien', 'aérien', 'aeroport', 'aéroport', 'avion', 'tunisair', 'vol', 'نقل جوي', 'مطار', 'طائرة'],
-  Poste: ['poste', 'post', 'courrier', 'colis', 'facteur', 'bureau de poste', 'بريد'],
-  Telecommunications: ['telecommunication', 'télécommunication', 'telecom', 'télécom', 'tel', 'tél', 'operateur', 'opérateur', 'telephonie', 'téléphonie', 'mobile', 'fibre', 'tt', 'ooredoo', 'orange', 'اتصالات'],
-  InternetMedias: ['internet', 'media', 'médias', 'web', 'presse', 'radio', 'television', 'télévision', 'tv', 'journal', 'إنترنت', 'إعلام']
-};
 
 function computeFilterState(appState, lang) {
   const selectedCountryCode = appState.selectedCountry || 'TN';
@@ -925,7 +984,20 @@ function computeFilterState(appState, lang) {
   allEvalsData.forEach(e => {
     if (e) {
       const key = e.id || `${e.targetEntity || e.actorName}-${e.rating}-${e.date || ''}-${e.comment || ''}`;
-      evalsMap.set(key, e);
+      if (!evalsMap.has(key)) {
+        evalsMap.set(key, e);
+      } else {
+        const existing = evalsMap.get(key);
+        evalsMap.set(key, {
+          ...existing,
+          ...e,
+          macroScores: existing.macroScores || e.macroScores,
+          indicatorsData: existing.indicatorsData || e.indicatorsData,
+          pillarScores: existing.pillarScores || e.pillarScores,
+          categoryScores: existing.categoryScores || e.categoryScores,
+          isTerritoryRating: existing.isTerritoryRating || e.isTerritoryRating
+        });
+      }
     }
   });
   const allEvals = Array.from(evalsMap.values());
@@ -967,12 +1039,20 @@ function computeFilterState(appState, lang) {
       const eCountry = e.country || selectedCountryCode;
       if (normalizeStrLocal(eCountry) !== normalizeStrLocal(selectedCountryCode)) return false;
       if (selectedPillar !== 'ALL') {
-        const p = normalizePillar(e.pillar || e.societalPillar);
-        if (p !== selectedPillar) return false;
+        // NDPI territorial docs span all pillars — don't exclude them by the fixed 'pillar' field
+        if (!(e.isTerritoryRating && e.macroScores)) {
+          const p = normalizePillar(e.pillar || e.societalPillar);
+          if (p !== selectedPillar) return false;
+        }
       }
       if (selectedMacro !== 'ALL') {
-        const sec = normalizeSector(e.sectorName || e.macroSector || e.sector);
-        if (sec !== selectedMacro) return false;
+        // NDPI territorial docs span all macro-sectors — don't exclude them by the fixed 'macroSector' field
+        if (e.isTerritoryRating && e.macroScores) {
+          // Keep: macroScores will be used directly in getSectorScoreForEvals
+        } else {
+          const sec = normalizeSector(e.sectorName || e.macroSector || e.sector);
+          if (sec !== selectedMacro) return false;
+        }
       }
       if (selectedRegions.length > 0) {
         const eRegNorm = normalizeStrLocal(e.region);
@@ -1094,26 +1174,112 @@ function computeFilterState(appState, lang) {
   const getSectorScoreForEvals = (evalsSubset, secId) => {
     const secNorm = normalizeStrLocal(secId);
 
-    let secEvals;
     if (selectedMacro !== 'ALL') {
-      const allowedKeywords = (mesoSectorKeywords[secId] || []).map(normalizeStrLocal).filter(k => k.length >= 5);
-      secEvals = evalsSubset.filter(e => {
-        const eMeso = normalizeStrLocal(e.mesoSector || e.subSector || '');
-        if (!eMeso) return false; // no meso field → cannot assign to any sub-sector
-        // Exact ID match
-        if (eMeso === secNorm) return true;
-        // Long-keyword match only (≥5 chars prevents short-token false positives like "med", "bio", "art")
-        return allowedKeywords.some(k => eMeso === k);
-      });
-    } else {
-      secEvals = evalsSubset.filter(e => {
-        const sec = normalizeSector(e.sectorName || e.macroSector || e.sector);
-        return sec === secId;
-      });
-    }
+      // ── SUB-SECTOR (MESO-SECTOR) EVALUATION ──
+      const allowedKeywords = (mesoSectorKeywords[secId] || [secId]).map(normalizeStrLocal).filter(k => k.length >= 3);
+      let total = 0, count = 0;
 
-    if (!secEvals || secEvals.length === 0) return 0;
-    return parseFloat((secEvals.reduce((s, e) => s + (parseFloat(e.rating) || 0), 0) / secEvals.length).toFixed(1));
+      evalsSubset.forEach(e => {
+        // A. NDPI territorial evaluations (extract from indicatorsData)
+        if (e.isTerritoryRating && e.indicatorsData) {
+          let indArr = e._parsedIndicators;
+          if (!indArr) {
+            try { indArr = typeof e.indicatorsData === 'string' ? JSON.parse(e.indicatorsData) : e.indicatorsData; e._parsedIndicators = indArr; } catch(_) {}
+          }
+          if (Array.isArray(indArr) && indArr.length > 0) {
+            let mTot = 0, mCnt = 0;
+            for (let i = 0; i < indArr.length; i++) {
+              const ind = indArr[i];
+              const sNorm = normalizeStrLocal(ind.s || '');
+              const matchesMeso = sNorm === secNorm || allowedKeywords.some(k => sNorm === k || (k.length >= 4 && (sNorm.includes(k) || k.includes(sNorm))));
+              if (matchesMeso) {
+                if (selectedPillar !== 'ALL' && ind.p !== selectedPillar) continue;
+                mTot += ind.r;
+                mCnt++;
+              }
+            }
+            if (mCnt > 0) {
+              total += mTot / mCnt;
+              count++;
+              return;
+            }
+          }
+        }
+
+        // B. Regular citizen / expert evaluations (match on mesoSector field)
+        const eMeso = normalizeStrLocal(e.mesoSector || e.subSector || '');
+        if (eMeso) {
+          const matchesMeso = eMeso === secNorm || allowedKeywords.some(k => eMeso === k || (k.length >= 4 && (eMeso.includes(k) || k.includes(eMeso))));
+          if (matchesMeso) {
+            total += parseFloat(e.rating) || 0;
+            count++;
+          }
+        }
+      });
+
+      const rawAvg = count > 0 ? total / count : 0;
+      if (rawAvg > 0) {
+        return Math.max(0.1, parseFloat(rawAvg.toFixed(1)));
+      }
+      // Temporaire : en l'absence d'évaluations spécifiques au train, donner à CheminDeFer la même note que Route
+      if (secId === 'CheminDeFer') {
+        return getSectorScoreForEvals(evalsSubset, 'Route');
+      }
+      return 0;
+    } else {
+      // ── MACRO-SECTOR (7 SECTEURS) EVALUATION ──
+      let total = 0, count = 0;
+      evalsSubset.forEach(e => {
+        // A. NDPI territorial docs: read from macroScores
+        if (e.isTerritoryRating && e.macroScores) {
+          let parsedMacro = e.macroScores;
+          if (typeof parsedMacro === 'string') {
+            try { parsedMacro = JSON.parse(parsedMacro); } catch(_) {}
+          }
+          if (parsedMacro) {
+            const val = parsedMacro[secId];
+            if (val !== undefined && val !== null) {
+              total += parseFloat(val) || 0;
+              count++;
+              return;
+            }
+          }
+        }
+
+        // Fallback for NDPI from indicatorsData
+        if (e.isTerritoryRating && e.indicatorsData) {
+          let indArr = e._parsedIndicators;
+          if (!indArr) {
+            try { indArr = typeof e.indicatorsData === 'string' ? JSON.parse(e.indicatorsData) : e.indicatorsData; e._parsedIndicators = indArr; } catch(_) {}
+          }
+          if (Array.isArray(indArr) && indArr.length > 0) {
+            let mTot = 0, mCnt = 0;
+            for (let i = 0; i < indArr.length; i++) {
+              if (indArr[i].m === secId) {
+                if (selectedPillar !== 'ALL' && indArr[i].p !== selectedPillar) continue;
+                mTot += indArr[i].r;
+                mCnt++;
+              }
+            }
+            if (mCnt > 0) {
+              total += mTot / mCnt;
+              count++;
+              return;
+            }
+          }
+        }
+
+        // B. Normal citizen / expert evaluation: match by macroSector field
+        const sec = normalizeSector(e.sectorName || e.macroSector || e.sector);
+        if (sec === secId) {
+          total += parseFloat(e.rating) || 0;
+          count++;
+        }
+      });
+
+      const rawAvg = count > 0 ? total / count : 0;
+      return rawAvg > 0 ? Math.max(0.1, parseFloat(rawAvg.toFixed(1))) : 0;
+    }
   };
 
   // ── CHART CURVES (Sectoral Performance Line Chart — Multi-Region / Multi-Locality) ──
@@ -1128,12 +1294,16 @@ function computeFilterState(appState, lang) {
         const eCountry = e.country || selectedCountryCode;
         if (normalizeStrLocal(eCountry) !== normalizeStrLocal(selectedCountryCode)) return false;
         if (selectedPillar !== 'ALL') {
-          const p = normalizePillar(e.pillar || e.societalPillar);
-          if (p !== selectedPillar) return false;
+          if (!(e.isTerritoryRating && (e.pillarScores || e.indicatorsData))) {
+            const p = normalizePillar(e.pillar || e.societalPillar);
+            if (p !== selectedPillar) return false;
+          }
         }
         if (selectedMacro !== 'ALL') {
-          const sec = normalizeSector(e.sectorName || e.macroSector || e.sector);
-          if (sec !== selectedMacro) return false;
+          if (!(e.isTerritoryRating && (e.macroScores || e.indicatorsData))) {
+            const sec = normalizeSector(e.sectorName || e.macroSector || e.sector);
+            if (sec !== selectedMacro) return false;
+          }
         }
         const eLoc = normalizeStrLocal(e.locality);
         return eLoc === locNorm || (eLoc && locNorm && (eLoc.includes(locNorm) || locNorm.includes(eLoc)));
@@ -1156,12 +1326,16 @@ function computeFilterState(appState, lang) {
         const eCountry = e.country || selectedCountryCode;
         if (normalizeStrLocal(eCountry) !== normalizeStrLocal(selectedCountryCode)) return false;
         if (selectedPillar !== 'ALL') {
-          const p = normalizePillar(e.pillar || e.societalPillar);
-          if (p !== selectedPillar) return false;
+          if (!(e.isTerritoryRating && (e.pillarScores || e.indicatorsData))) {
+            const p = normalizePillar(e.pillar || e.societalPillar);
+            if (p !== selectedPillar) return false;
+          }
         }
         if (selectedMacro !== 'ALL') {
-          const sec = normalizeSector(e.sectorName || e.macroSector || e.sector);
-          if (sec !== selectedMacro) return false;
+          if (!(e.isTerritoryRating && (e.macroScores || e.indicatorsData))) {
+            const sec = normalizeSector(e.sectorName || e.macroSector || e.sector);
+            if (sec !== selectedMacro) return false;
+          }
         }
         const eReg = normalizeStrLocal(e.region);
         const eLoc = normalizeStrLocal(e.locality);
@@ -1362,7 +1536,7 @@ export function attachAnalyticsEvents(containerEl, appState, onStateChangeCallba
     if (filtered.length === 0) {
       feed.innerHTML = `<div style="text-align:center; color:#94A3B8; font-size:12px; padding:24px 12px; font-weight:500;">ℹ️ Aucune évaluation trouvée pour les critères de filtres sélectionnés.</div>`;
     } else {
-      feed.innerHTML = filtered.slice(0, 10).map(buildEvalItemHTML).join('');
+      feed.innerHTML = filtered.slice(0, 10).map(rev => buildEvalItemHTML(rev, appState)).join('');
       attachLightboxToImages(feed);
     }
   }

@@ -6,6 +6,7 @@ import { initialAppData } from '../data/mockData.js';
 import { attachLightboxToImages } from '../utils/imageLightbox.js';
 import { initRadarChart } from '../components/radar.js';
 import { getRadarScoresFromEvals } from './analytics.js';
+import { renderAuthorAvatarHTML, renderAuthorVerifiedBadgeHTML } from '../utils/avatarHelper.js';
 
 // Color helper function based on score (0-5 scale)
 function getScoreColor(score) {
@@ -68,7 +69,31 @@ export function renderDashboardView(appState, translations) {
   const sectorTotals = {};
   const sectorCounts = {};
 
+  // NDPI macro-sector ID → macroScores JSON key mapping
+  const ndpiMacroKeyMap = {
+    Governance: 'Governance', SecurityDefense: 'SecurityDefense',
+    HealthHygiene: 'HealthHygiene', InstructionCulture: 'InstructionCulture',
+    FoodFinance: 'FoodFinance', HousingTourism: 'HousingTourism', TransportTelco: 'TransportTelco'
+  };
+
   activeEvals.forEach(e => {
+    // NDPI territorial docs: macroScores has all 7 sector scores — use them directly
+    if (e.isTerritoryRating && e.macroScores) {
+      let parsedMacro = null;
+      try { parsedMacro = typeof e.macroScores === 'string' ? JSON.parse(e.macroScores) : e.macroScores; } catch(_) {}
+      if (parsedMacro) {
+        sectorMapKeys.forEach(s => {
+          const val = parsedMacro[ndpiMacroKeyMap[s.id]];
+          if (val !== undefined && val !== null) {
+            if (!sectorTotals[s.id]) { sectorTotals[s.id] = 0; sectorCounts[s.id] = 0; }
+            sectorTotals[s.id] += parseFloat(val) || 0;
+            sectorCounts[s.id]++;
+          }
+        });
+        return; // skip normal sector matching for this NDPI doc
+      }
+    }
+    // Normal evaluation: match by macroSector field
     const secNorm = normalizeStr(e.sectorName || e.macroSector || e.sector || '');
     const matched = sectorMapKeys.find(s => {
       const sIdNorm = normalizeStr(s.id);
@@ -79,7 +104,6 @@ export function renderDashboardView(appState, translations) {
              (l1Norm && secNorm.includes(l1Norm)) ||
              s.keywords.some(k => secNorm.includes(normalizeStr(k)));
     });
-
     if (matched) {
       const sid = matched.id;
       if (!sectorTotals[sid]) { sectorTotals[sid] = 0; sectorCounts[sid] = 0; }
@@ -127,6 +151,46 @@ export function renderDashboardView(appState, translations) {
   const pillarCounts = { Economic: 0, Social: 0, Environmental: 0 };
 
   activeEvals.forEach(e => {
+    // NDPI territorial docs: use real pillarScores computed from indicatorsData
+    if (e.isTerritoryRating && (e.pillarScores || e.indicatorsData)) {
+      let scores = e.pillarScores;
+      if (!scores && e.indicatorsData) {
+        try {
+          const arr = typeof e.indicatorsData === 'string' ? JSON.parse(e.indicatorsData) : e.indicatorsData;
+          if (Array.isArray(arr) && arr.length > 0) {
+            let eTot = 0, eCnt = 0, sTot = 0, sCnt = 0, envTot = 0, envCnt = 0;
+            for (let i = 0; i < arr.length; i++) {
+              const ind = arr[i];
+              if (ind.p === 'Economic') { eTot += ind.r; eCnt++; }
+              else if (ind.p === 'Social') { sTot += ind.r; sCnt++; }
+              else if (ind.p === 'Environmental') { envTot += ind.r; envCnt++; }
+            }
+            scores = {
+              Economic: eCnt > 0 ? eTot / eCnt : 0,
+              Social: sCnt > 0 ? sTot / sCnt : 0,
+              Environmental: envCnt > 0 ? envTot / envCnt : 0
+            };
+          }
+        } catch (_) {}
+      }
+
+      if (scores) {
+        if (scores.Economic !== undefined && scores.Economic > 0) {
+          pillarTotals.Economic += parseFloat(scores.Economic) || 0;
+          pillarCounts.Economic++;
+        }
+        if (scores.Social !== undefined && scores.Social > 0) {
+          pillarTotals.Social += parseFloat(scores.Social) || 0;
+          pillarCounts.Social++;
+        }
+        if (scores.Environmental !== undefined && scores.Environmental > 0) {
+          pillarTotals.Environmental += parseFloat(scores.Environmental) || 0;
+          pillarCounts.Environmental++;
+        }
+        return; // skip normal pillar matching for this NDPI doc
+      }
+    }
+    // Normal evaluation: match by pillar field
     const p = normalizePillar(e.pillar || e.societalPillar);
     pillarTotals[p] += parseFloat(e.rating) || 0;
     pillarCounts[p]++;
@@ -339,10 +403,12 @@ export function renderDashboardView(appState, translations) {
     'Resilience': 'Résilience aux catastrophes'
   };
 
-  // 6. CARD 6: Dernières Évaluations
+  // 6. CARD 6: Dernières Évaluations (Plafonné à 50 au maximum, affichage initial des 10 premières)
   const sortedActiveEvals = activeEvals.slice().sort((a, b) => (b.createdAtSeconds || 0) - (a.createdAtSeconds || 0));
-  const recentRatingsHTML = sortedActiveEvals.length > 0
-    ? sortedActiveEvals.map(rev => {
+  const cappedEvals = sortedActiveEvals.slice(0, 50);
+  const recentRatingsHTML = cappedEvals.length > 0
+    ? cappedEvals.map((rev, idx) => {
+        const isExtra = idx >= 10;
         const sectorLabel = rev.sectorName || rev.macroSector || rev.sector || '';
         const subSectorLabel = rev.mesoSector || rev.subSector || '';
         const perfLabel = rev.pillar || rev.societalPillar || '';
@@ -359,14 +425,14 @@ export function renderDashboardView(appState, translations) {
         }
 
         return `
-        <div class="recent-rating-item action-rating-item" data-author-name="${rev.authorName || 'Contributeur'}">
-          <div class="rating-user-avatar-circle" style="background: ${rev.authorAvatarBg || '#002B49'}; color: ${rev.authorAvatarColor || '#FFFFFF'};">
-            ${rev.authorInitials || 'U'}
-          </div>
+        <div class="recent-rating-item action-rating-item ${isExtra ? 'dashboard-eval-extra' : ''}" 
+          data-author-name="${rev.authorName || 'Contributeur'}"
+          style="${isExtra ? 'display: none !important;' : ''}">
+          ${renderAuthorAvatarHTML(rev, appState, rev.authorInitials || 'U', rev.authorAvatarBg || '#002B49', rev.authorAvatarColor || '#FFFFFF')}
           <div style="flex: 1;">
-            <div style="font-size: 13px; font-weight: 700; color: #1E293B;">
-              <span>${rev.authorName || 'Contributeur'}</span>
-              <span style="color: #94A3B8; font-weight: 400;"> • </span>
+            <div style="font-size: 13px; font-weight: 700; color: #1E293B; display: flex; align-items: center; flex-wrap: wrap; gap: 2px;">
+              <span>${rev.authorName || 'Contributeur'}</span>${renderAuthorVerifiedBadgeHTML(rev, appState)}
+              <span style="color: #94A3B8; font-weight: 400; margin: 0 2px;"> • </span>
               <span style="color: #00A859; font-weight: 600;">${rev.targetEntity || rev.actorName || 'Acteur'}</span>
             </div>
 
@@ -522,16 +588,25 @@ export function renderDashboardView(appState, translations) {
         </div>
       </div>
 
-      <!-- CARD 6: Dernières Évaluations (50 Nouveaux) -->
-      <div class="card">
+      <!-- CARD 6: Dernières Évaluations (50 Récents) -->
+      <div class="card" id="card-recent-evaluations">
         <div class="card-header" style="margin-bottom: 14px;">
           <div class="card-title" style="letter-spacing: 0.5px; text-transform: uppercase; font-size: 14px;">DERNIÈRES ÉVALUATIONS</div>
-          <span class="badge badge-navy" style="padding: 5px 12px; font-size: 11px; border-radius: 12px;">50 Nouveaux</span>
+          <span class="badge badge-navy" style="padding: 5px 12px; font-size: 11px; border-radius: 12px;">${Math.min(50, sortedActiveEvals.length)} Récents</span>
         </div>
 
-        <div>
+        <div id="recent-evaluations-list">
           ${recentRatingsHTML}
         </div>
+        ${cappedEvals.length > 10 ? `
+          <div style="text-align: center; margin-top: 14px; padding-top: 10px; border-top: 1px dashed #E2E8F0;">
+            <button id="btn-load-more-dashboard" class="btn" style="background: #F1F5F9; color: #002B49; border: 1.5px solid #CBD5E1; font-size: 11.5px; font-weight: 700; padding: 8px 18px; border-radius: 8px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); transition: all 0.2s ease;">
+              <span>Afficher plus (+10)</span>
+              <span id="load-more-dashboard-count" style="font-size: 10px; color: #64748B;">(${cappedEvals.length - 10} restants)</span>
+              <span style="font-size: 9px;">▼</span>
+            </button>
+          </div>
+        ` : ''}
       </div>
     </div>
   `;
@@ -605,6 +680,24 @@ export function attachDashboardEvents(containerEl, onCountryChange, onSectorSele
     });
   });
 
+  // Load More Button Listener for Recent Evaluations
+  const loadMoreBtn = containerEl.querySelector('#btn-load-more-dashboard');
+  if (loadMoreBtn) {
+    loadMoreBtn.addEventListener('click', () => {
+      const hiddenItems = Array.from(containerEl.querySelectorAll('.dashboard-eval-extra'));
+      const currentlyHidden = hiddenItems.filter(el => el.style.display === 'none' || el.style.getPropertyValue('display') === 'none');
+      const toShow = currentlyHidden.slice(0, 10);
+      toShow.forEach(el => el.style.setProperty('display', 'flex', 'important'));
+      const stillHidden = currentlyHidden.length - toShow.length;
+      if (stillHidden <= 0) {
+        loadMoreBtn.style.display = 'none';
+      } else {
+        const countSpan = loadMoreBtn.querySelector('#load-more-dashboard-count');
+        if (countSpan) countSpan.textContent = `(${stillHidden} restants)`;
+      }
+    });
+  }
+
   // Attach Lightbox viewer for evaluation attachment images
   attachLightboxToImages(containerEl);
 }
@@ -632,6 +725,19 @@ function showActorRadarModal(actorName, actorSector, actorScore, actorAvatarUrl,
 
   const scoreColor = parseFloat(actorScore) >= 4 ? '#00A859' : parseFloat(actorScore) >= 3 ? '#28C76F' : parseFloat(actorScore) >= 2 ? '#FFB800' : '#EA5455';
 
+  // Look up actor description from allUsers
+  const _normStr = s => !s ? '' : String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'').trim();
+  const _normActor = _normStr(actorName);
+  const _allUsers = (appState && appState.allUsers) || [];
+  const _matchedUser = _allUsers.find(u => {
+    const uActor = (u.businessProfile && u.businessProfile.actorName) || u.name || '';
+    const n = _normStr(uActor);
+    return n === _normActor || n.includes(_normActor) || _normActor.includes(n);
+  });
+  const _actorDesc =
+    (_matchedUser && _matchedUser.businessProfile && _matchedUser.businessProfile.description) ||
+    (_matchedUser && _matchedUser.description) || '';
+
   overlay.innerHTML = `
     <div id="actor-radar-panel" style="width:100%; max-width:480px; background:#FFFFFF; border-radius:20px; box-shadow:0 24px 48px rgba(0,0,0,0.35); flex-shrink:0;">
       <!-- Header -->
@@ -646,6 +752,14 @@ function showActorRadarModal(actorName, actorSector, actorScore, actorAvatarUrl,
           </div>
         </div>
       </div>
+
+      <!-- Actor Description (shown only if available) -->
+      ${_actorDesc ? `
+        <div style="padding: 12px 16px; background: #F0FDF4; border-bottom: 1px solid #D1FAE5;">
+          <div style="font-size: 9.5px; font-weight: 700; color: #059669; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">📋 À propos de l'établissement</div>
+          <div style="font-size: 11.5px; color: #1E3A2F; line-height: 1.5;">${_actorDesc}</div>
+        </div>
+      ` : ''}
 
       <!-- Subtitle -->
       <div style="padding:14px 16px 8px; border-bottom:1px solid #F1F5F9;">

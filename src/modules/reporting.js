@@ -654,6 +654,8 @@ export function attachReportingEvents(containerEl, appState, translations, onSub
       authorInitials: initials,
       authorAvatarBg: "#002B49",
       authorAvatarColor: "#FFFFFF",
+      authorAvatarUrl: user.avatarBase64 || user.photoURL || null,
+      authorIsVerified: Boolean(user.isVerified),
       location: (localitySelect.value && regionSelect.value)
         ? `${localitySelect.value}, ${regionSelect.value}, ${selectedCountry}`
         : (localitySelect.value ? `${localitySelect.value}, ${selectedCountry}` : (regionSelect.value ? `${regionSelect.value}, ${selectedCountry}` : selectedCountry)),

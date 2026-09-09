@@ -23,7 +23,7 @@ async function getFirebaseModules() {
     const { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
             sendEmailVerification, onAuthStateChanged, signOut } =
       await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js');
-    const { getFirestore, doc, getDoc, setDoc, updateDoc, addDoc, collection, getDocs, query, where, serverTimestamp } =
+    const { getFirestore, doc, getDoc, setDoc, updateDoc, addDoc, collection, getDocs, query, where, limit, serverTimestamp } =
       await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
 
     _app = initializeApp(firebaseConfig);
@@ -45,6 +45,7 @@ async function getFirebaseModules() {
     _db._getDocs = getDocs;
     _db._query = query;
     _db._where = where;
+    _db._limit = limit;
     _db._serverTimestamp = serverTimestamp;
 
     return { app: _app, auth: _auth, db: _db };
@@ -195,6 +196,41 @@ export async function firestoreSaveEvaluation(arg1, arg2) {
   }
 }
 
+// Helper to automatically sanitize corrupted accent encodings (e.g. from ANSI/CP1252 script injections)
+function _cleanTextEncoding(str) {
+  if (!str || typeof str !== 'string') return str;
+  return str
+    .replace(/\u00C3\u0089/g, 'É')
+    .replace(/\u00C3\u00A9/g, 'é')
+    .replace(/\u00C3\u00A8/g, 'è')
+    .replace(/\u00C3\u00AA/g, 'ê')
+    .replace(/\u00C3\u00BB/g, 'û')
+    .replace(/\u00C3\u00B4/g, 'ô')
+    .replace(/\u00C3\u00AE/g, 'î')
+    .replace(/Ã‰/g, 'É')
+    .replace(/Ã©/g, 'é')
+    .replace(/Ã¨/g, 'è')
+    .replace(/Ãª/g, 'ê')
+    .replace(/Ã»/g, 'û')
+    .replace(/Ã´/g, 'ô')
+    .replace(/Ã®/g, 'î')
+    .replace(/A°°%chelle|A°%chelle|A%chelle|%chelle|\uFFFD%?chelle/gi, 'Échelle')
+    .replace(/A°°%|A°%|A%/g, 'É')
+    .replace(/ÉÉchelle/gi, 'Échelle')
+    .replace(/éÉchelle/gi, 'Échelle')
+    .replace(/ÉÉ+/g, 'É')
+    .replace(/DonnǸes|Donnes/gi, 'Données')
+    .replace(/auditǸe|audite/gi, 'auditée')
+    .replace(/Lgislatif|Lgislatif/gi, 'Législatif')
+    .replace(/Excutif|Excutif/gi, 'Exécutif')
+    .replace(/Sret_Nationale|Sret_Nationale/gi, 'Sûreté Nationale')
+    .replace(/Sûret_Nationale/gi, 'Sûreté Nationale')
+    .replace(/Qualit /gi, 'Qualité ')
+    .replace(/cr s|crs/gi, 'créés')
+    .replace(/g n r e|gnre/gi, 'générée')
+    .replace(/R silience|Rsilience/gi, 'Résilience');
+}
+
 /**
  * Load all evaluations for a given country from Firestore.
  * Returns array of evaluation objects or [] on failure.
@@ -204,12 +240,22 @@ export async function firestoreLoadEvaluations(country) {
   if (!modules) return [];
   const { db } = modules;
   try {
-    const q = (db._query && db._collection) ? db._query(db._collection(db, "evaluations")) : (db._collection ? db._collection(db, "evaluations") : null);
+    let q = null;
+    if (db._query && db._collection && db._limit) {
+      q = db._query(db._collection(db, "evaluations"), db._limit(350));
+    } else if (db._collection) {
+      q = db._collection(db, "evaluations");
+    }
     if (!q || !db._getDocs) return [];
     const snapshot = await db._getDocs(q);
     const evals = [];
     snapshot.forEach(docSnap => {
       const d = docSnap.data();
+
+      // Filter out test pings, corrupted docs without essential data, or stray test doc
+      if (d.testEncoding || d.testPing || docSnap.id === 'a4D2RIVALHIForDaJw4t') return;
+      if (!d.pillar && !d.societalPillar && !d.rating && !d.score && !d.macroSector) return;
+
       // Extract Firestore Timestamp createdAt as both raw seconds (for sorting) and formatted string (for display)
       let createdAtSeconds = 0;
       let createdAtDisplay = '';
@@ -224,29 +270,81 @@ export async function firestoreLoadEvaluations(country) {
           createdAtDisplay = dt.toLocaleString('fr-TN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
         }
       }
+
+      let rawTarget = d.targetEntity || d.actorName || d.entity || 'Structure Publique';
+      rawTarget = _cleanTextEncoding(rawTarget);
+      if (d.isTerritoryRating || rawTarget.toLowerCase().includes('chelle') || rawTarget.toLowerCase().includes('territoriale')) {
+        rawTarget = d.locality ? `Échelle Territoriale (${_cleanTextEncoding(d.locality)})` : 'Échelle Territoriale';
+      }
+
+      let rawActor = d.actorName || rawTarget || 'Structure Publique';
+      rawActor = _cleanTextEncoding(rawActor);
+      if (d.isTerritoryRating || rawActor.toLowerCase().includes('chelle') || rawActor.toLowerCase().includes('territoriale')) {
+        rawActor = 'Échelle Territoriale';
+      }
+
+      let parsedMacroScores = d.macroScores || null;
+      if (parsedMacroScores && typeof parsedMacroScores === 'string') {
+        try { parsedMacroScores = JSON.parse(parsedMacroScores); } catch (_) {}
+      }
+
+      let pillarScores = null;
+      let categoryScores = null;
+      if (d.indicatorsData) {
+        try {
+          const indArr = typeof d.indicatorsData === 'string' ? JSON.parse(d.indicatorsData) : d.indicatorsData;
+          if (Array.isArray(indArr) && indArr.length > 0) {
+            let eTot = 0, eCnt = 0, sTot = 0, sCnt = 0, envTot = 0, envCnt = 0;
+            const catTotals = {}, catCounts = {};
+            for (let i = 0; i < indArr.length; i++) {
+              const ind = indArr[i];
+              if (ind.p === 'Economic') { eTot += ind.r; eCnt++; }
+              else if (ind.p === 'Social') { sTot += ind.r; sCnt++; }
+              else if (ind.p === 'Environmental') { envTot += ind.r; envCnt++; }
+              if (ind.c) {
+                catTotals[ind.c] = (catTotals[ind.c] || 0) + ind.r;
+                catCounts[ind.c] = (catCounts[ind.c] || 0) + 1;
+              }
+            }
+            pillarScores = {
+              Economic: eCnt > 0 ? parseFloat((eTot / eCnt).toFixed(2)) : 0,
+              Social: sCnt > 0 ? parseFloat((sTot / sCnt).toFixed(2)) : 0,
+              Environmental: envCnt > 0 ? parseFloat((envTot / envCnt).toFixed(2)) : 0
+            };
+            categoryScores = {};
+            for (const c in catTotals) {
+              categoryScores[c] = parseFloat((catTotals[c] / catCounts[c]).toFixed(2));
+            }
+          }
+        } catch (_) {}
+      }
+
       evals.push({
         id: docSnap.id,
         country: d.country || country || 'TN',
-        region: d.region || '',
-        locality: d.locality || '',
-        authorName: d.authorName || d.author || 'Anonyme',
+        region: _cleanTextEncoding(d.region || ''),
+        locality: _cleanTextEncoding(d.locality || ''),
+        authorName: _cleanTextEncoding(d.authorName || d.author || 'Anonyme'),
         authorInitials: d.authorInitials || (d.authorName || d.author || 'A').substring(0, 2).toUpperCase(),
         authorAvatarBg: d.authorAvatarBg || '#002B49',
         authorAvatarColor: d.authorAvatarColor || '#FFFFFF',
-        targetEntity: d.targetEntity || d.actorName || d.entity || 'Structure Publique',
-        sectorName: d.sectorName || d.macroSector || d.sector || 'Gouvernance',
-        macroSector: d.macroSector || d.sectorName || d.sector || 'Gouvernance',
-        mesoSector: d.mesoSector || d.subSector || '',
-        subSector: d.subSector || d.mesoSector || '',
-        pillar: d.pillar || d.societalPillar || 'Social',
-        societalPillar: d.societalPillar || d.pillar || 'Social',
-        category: d.category || d.indicatorCategory || '',
-        indicatorCategory: d.indicatorCategory || d.category || '',
-        type: d.type || d.indicatorType || d.kpi || '',
-        indicatorType: d.indicatorType || d.type || d.kpi || '',
-        kpi: d.kpi || d.type || d.indicatorType || '',
+        authorAvatarUrl: d.authorAvatarUrl || d.authorPhoto || d.authorAvatar || null,
+        authorIsVerified: Boolean(d.authorIsVerified || d.isVerified || false),
+        targetEntity: rawTarget,
+        actorName: rawActor,
+        sectorName: _cleanTextEncoding(d.sectorName || d.macroSector || d.sector || 'Gouvernance'),
+        macroSector: _cleanTextEncoding(d.macroSector || d.sectorName || d.sector || 'Gouvernance'),
+        mesoSector: _cleanTextEncoding(d.mesoSector || d.subSector || ''),
+        subSector: _cleanTextEncoding(d.subSector || d.mesoSector || ''),
+        pillar: _cleanTextEncoding(d.pillar || d.societalPillar || 'Social'),
+        societalPillar: _cleanTextEncoding(d.societalPillar || d.pillar || 'Social'),
+        category: _cleanTextEncoding(d.category || d.indicatorCategory || ''),
+        indicatorCategory: _cleanTextEncoding(d.indicatorCategory || d.category || ''),
+        type: _cleanTextEncoding(d.type || d.indicatorType || d.kpi || ''),
+        indicatorType: _cleanTextEncoding(d.indicatorType || d.type || d.kpi || ''),
+        kpi: _cleanTextEncoding(d.kpi || d.type || d.indicatorType || ''),
         rating: parseFloat(d.rating || d.score || 0),
-        comment: d.comment || '',
+        comment: _cleanTextEncoding(d.comment || ''),
         location: (d.locality && d.region)
           ? `${d.locality}, ${d.region}, ${d.country || country || 'TN'}`
           : (d.locality ? `${d.locality}, ${d.country || country || 'TN'}` : (d.region ? `${d.region}, ${d.country || country || 'TN'}` : (d.location || (d.country || country || 'TN')))),
@@ -256,6 +354,12 @@ export async function firestoreLoadEvaluations(country) {
         createdAtSeconds: createdAtSeconds,
         authorEmail: d.authorEmail || d.email || '',
         isTerritoryRating: d.isTerritoryRating || false,
+        indicatorsData: d.indicatorsData || null,
+        macroScores: parsedMacroScores,
+        pillarScores: pillarScores,
+        categoryScores: categoryScores,
+        district: d.district || '',
+        overallScore: typeof d.overallScore === 'number' ? d.overallScore : parseFloat(d.rating || d.score || 0),
         attachmentName: d.attachmentName || null,
         attachmentBase64: d.attachmentBase64 || d.photoUrl || null,
         photoUrl: d.photoUrl || d.attachmentBase64 || null,
@@ -285,13 +389,23 @@ export async function firestoreLoadUserEvaluations(userEmail, userName = '') {
   if (!userEmail) return [];
   try {
     if (!db._query || !db._collection || !db._where || !db._getDocs) return [];
-    // Strictly filter by authorEmail so new users with 0 ratings see an empty history
-    const q = db._query(db._collection(db, "evaluations"), db._where('authorEmail', '==', userEmail));
+    // Strictly filter by authorEmail so new users with 0 ratings see an empty history, cap at 100
+    let q = null;
+    if (db._limit) {
+      q = db._query(db._collection(db, "evaluations"), db._where('authorEmail', '==', userEmail), db._limit(100));
+    } else {
+      q = db._query(db._collection(db, "evaluations"), db._where('authorEmail', '==', userEmail));
+    }
     const snapshot = await db._getDocs(q);
     const evals = [];
 
     snapshot.forEach(docSnap => {
       const d = docSnap.data();
+
+      // Filter out test pings, corrupted docs without essential data, or stray test doc
+      if (d.testEncoding || d.testPing || docSnap.id === 'a4D2RIVALHIForDaJw4t') return;
+      if (!d.pillar && !d.societalPillar && !d.rating && !d.score && !d.macroSector) return;
+
       // Extract Firestore Timestamp createdAt for sorting and display
       let createdAtSeconds = 0;
       let createdAtDisplay = '';
@@ -307,30 +421,80 @@ export async function firestoreLoadUserEvaluations(userEmail, userName = '') {
         }
       }
       const isoDate = d.isoDate || d.date || null;
+      let rawTarget = d.targetEntity || d.actorName || d.entity || 'Structure Publique';
+      rawTarget = _cleanTextEncoding(rawTarget);
+      if (d.isTerritoryRating || rawTarget.toLowerCase().includes('chelle') || rawTarget.toLowerCase().includes('territoriale')) {
+        rawTarget = d.locality ? `Échelle Territoriale (${_cleanTextEncoding(d.locality)})` : 'Échelle Territoriale';
+      }
+
+      let rawActor = d.actorName || rawTarget || 'Structure Publique';
+      rawActor = _cleanTextEncoding(rawActor);
+      if (d.isTerritoryRating || rawActor.toLowerCase().includes('chelle') || rawActor.toLowerCase().includes('territoriale')) {
+        rawActor = 'Échelle Territoriale';
+      }
+
+      let parsedMacroScores = d.macroScores || null;
+      if (parsedMacroScores && typeof parsedMacroScores === 'string') {
+        try { parsedMacroScores = JSON.parse(parsedMacroScores); } catch (_) {}
+      }
+
+      let pillarScores = null;
+      let categoryScores = null;
+      if (d.indicatorsData) {
+        try {
+          const indArr = typeof d.indicatorsData === 'string' ? JSON.parse(d.indicatorsData) : d.indicatorsData;
+          if (Array.isArray(indArr) && indArr.length > 0) {
+            let eTot = 0, eCnt = 0, sTot = 0, sCnt = 0, envTot = 0, envCnt = 0;
+            const catTotals = {}, catCounts = {};
+            for (let i = 0; i < indArr.length; i++) {
+              const ind = indArr[i];
+              if (ind.p === 'Economic') { eTot += ind.r; eCnt++; }
+              else if (ind.p === 'Social') { sTot += ind.r; sCnt++; }
+              else if (ind.p === 'Environmental') { envTot += ind.r; envCnt++; }
+              if (ind.c) {
+                catTotals[ind.c] = (catTotals[ind.c] || 0) + ind.r;
+                catCounts[ind.c] = (catCounts[ind.c] || 0) + 1;
+              }
+            }
+            pillarScores = {
+              Economic: eCnt > 0 ? parseFloat((eTot / eCnt).toFixed(2)) : 0,
+              Social: sCnt > 0 ? parseFloat((sTot / sCnt).toFixed(2)) : 0,
+              Environmental: envCnt > 0 ? parseFloat((envTot / envCnt).toFixed(2)) : 0
+            };
+            categoryScores = {};
+            for (const c in catTotals) {
+              categoryScores[c] = parseFloat((catTotals[c] / catCounts[c]).toFixed(2));
+            }
+          }
+        } catch (_) {}
+      }
+
       evals.push({
         id: docSnap.id,
         country: d.country || 'TN',
-        region: d.region || '',
-        locality: d.locality || '',
-        authorName: d.authorName || d.author || 'Moi',
+        region: _cleanTextEncoding(d.region || ''),
+        locality: _cleanTextEncoding(d.locality || ''),
+        authorName: _cleanTextEncoding(d.authorName || d.author || 'Moi'),
         authorInitials: d.authorInitials || (d.authorName || d.author || 'M').substring(0, 2).toUpperCase(),
         authorAvatarBg: d.authorAvatarBg || '#002B49',
         authorAvatarColor: d.authorAvatarColor || '#FFFFFF',
-        targetEntity: d.targetEntity || d.actorName || d.entity || 'Structure Publique',
-        actorName: d.actorName || d.targetEntity || d.entity || 'Structure Publique',
-        sectorName: d.sectorName || d.macroSector || d.sector || 'Gouvernance',
-        macroSector: d.macroSector || d.sectorName || d.sector || 'Gouvernance',
-        mesoSector: d.mesoSector || d.subSector || '',
-        subSector: d.subSector || d.mesoSector || '',
-        pillar: d.pillar || d.societalPillar || 'Social',
-        societalPillar: d.societalPillar || d.pillar || 'Social',
-        category: d.category || d.indicatorCategory || '',
-        indicatorCategory: d.indicatorCategory || d.category || '',
-        type: d.type || d.indicatorType || d.kpi || '',
-        indicatorType: d.indicatorType || d.type || d.kpi || '',
-        kpi: d.kpi || d.type || d.indicatorType || '',
+        authorAvatarUrl: d.authorAvatarUrl || d.authorPhoto || d.authorAvatar || null,
+        authorIsVerified: Boolean(d.authorIsVerified || d.isVerified || false),
+        targetEntity: rawTarget,
+        actorName: rawActor,
+        sectorName: _cleanTextEncoding(d.sectorName || d.macroSector || d.sector || 'Gouvernance'),
+        macroSector: _cleanTextEncoding(d.macroSector || d.sectorName || d.sector || 'Gouvernance'),
+        mesoSector: _cleanTextEncoding(d.mesoSector || d.subSector || ''),
+        subSector: _cleanTextEncoding(d.subSector || d.mesoSector || ''),
+        pillar: _cleanTextEncoding(d.pillar || d.societalPillar || 'Social'),
+        societalPillar: _cleanTextEncoding(d.societalPillar || d.pillar || 'Social'),
+        category: _cleanTextEncoding(d.category || d.indicatorCategory || ''),
+        indicatorCategory: _cleanTextEncoding(d.indicatorCategory || d.category || ''),
+        type: _cleanTextEncoding(d.type || d.indicatorType || d.kpi || ''),
+        indicatorType: _cleanTextEncoding(d.indicatorType || d.type || d.kpi || ''),
+        kpi: _cleanTextEncoding(d.kpi || d.type || d.indicatorType || ''),
         rating: parseFloat(d.rating || d.score || 0),
-        comment: d.comment || '',
+        comment: _cleanTextEncoding(d.comment || ''),
         location: (d.locality && d.region)
           ? `${d.locality}, ${d.region}, ${d.country || 'TN'}`
           : (d.locality ? `${d.locality}, ${d.country || 'TN'}` : (d.region ? `${d.region}, ${d.country || 'TN'}` : (d.location || (d.country || 'TN')))),
@@ -341,6 +505,12 @@ export async function firestoreLoadUserEvaluations(userEmail, userName = '') {
         authorEmail: d.authorEmail || d.email || '',
         isTerritoryRating: d.isTerritoryRating || false,
         isExpertRating: d.isExpertRating || false,
+        indicatorsData: d.indicatorsData || null,
+        macroScores: parsedMacroScores,
+        pillarScores: pillarScores,
+        categoryScores: categoryScores,
+        district: d.district || '',
+        overallScore: typeof d.overallScore === 'number' ? d.overallScore : parseFloat(d.rating || d.score || 0),
         attachmentName: d.attachmentName || null,
         attachmentBase64: d.attachmentBase64 || d.photoUrl || null,
         photoUrl: d.photoUrl || d.attachmentBase64 || null,
@@ -428,6 +598,7 @@ export async function firestoreLoadAllUsers() {
         registrationDate: d.registrationDate || '',
         emailVerified: d.emailVerified || false,
         businessProfile: d.businessProfile || null,
+        description: d.description || (d.businessProfile && d.businessProfile.description) || '',
         onboardingComplete: d.onboardingComplete || false,
         isVerified: d.isVerified || false,
         verificationPending: d.verificationPending || false,
