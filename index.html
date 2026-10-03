@@ -2,17 +2,32 @@
 <html lang="fr" data-lang="fr">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>PerfECT - Performance Evaluation & Communication Tech</title>
   
-  <!-- Detect mobile/Android BEFORE any CSS loads to prevent flash -->
+  <!-- PWA & Mobile Web App Meta Tags -->
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="PerfECT" />
+  <meta name="application-name" content="PerfECT" />
+  <meta name="theme-color" content="#002B49" />
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="apple-touch-icon" href="./src/assets/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="./src/assets/icon-192.png" />
+
+  <!-- Detect mobile/iOS/Android/PWA BEFORE any CSS loads to prevent flash -->
   <script>
     (function() {
       var ua = window.navigator.userAgent || '';
       var isAndroid = ua.indexOf('Android') > -1;
       var isMobile = /Mobi|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
-      if (isAndroid || isMobile) {
+      var isStandalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+      if (isAndroid || isMobile || isStandalone) {
         document.documentElement.classList.add('is-mobile-native');
+      }
+      if (isStandalone) {
+        document.documentElement.classList.add('is-standalone-pwa');
       }
       window.addEventListener('error', function(e) {
         console.error('Global Error Captured:', e.message, e.filename, e.lineno);
@@ -24,8 +39,7 @@
     })();
   </script>
 
-
-  <!-- Inline style: hides dev bar immediately on mobile/Android before CSS loads -->
+  <!-- Inline style: hides dev bar immediately on mobile/Android/PWA before CSS loads -->
   <style>
     html.is-mobile-native .preview-control-bar,
     html.is-mobile-native .mobile-notch,
@@ -44,8 +58,19 @@
       width: 100vw !important;
       max-width: 100vw !important;
       height: 100vh !important;
+      height: 100dvh !important;
       border-radius: 0 !important;
       box-shadow: none !important;
+    }
+    /* Safe Area support for iOS notch / Dynamic Island and Home Bar */
+    html.is-mobile-native #app-header-mount {
+      padding-top: env(safe-area-inset-top, 0px);
+    }
+    html.is-mobile-native .floating-bottom-nav {
+      bottom: calc(14px + env(safe-area-inset-bottom, 0px)) !important;
+    }
+    html.is-mobile-native .app-content-body {
+      padding-bottom: calc(90px + env(safe-area-inset-bottom, 0px)) !important;
     }
   </style>
 
@@ -108,5 +133,82 @@
   </div>
 
   <script type="module" src="./src/main.js?v=2.91.0"></script>
+
+  <!-- PWA Service Worker Registration & iOS Install Prompt -->
+  <script>
+    // 1. Register Service Worker for offline capabilities & instant updates
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function() {
+        navigator.serviceWorker.register('./sw.js')
+          .then(function(reg) {
+            console.log('[PWA] Service Worker registered with scope:', reg.scope);
+            // Check for updates automatically
+            reg.onupdatefound = function() {
+              var installingWorker = reg.installing;
+              installingWorker.onstatechange = function() {
+                if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                  console.log('[PWA] Nouvelle version disponible, prête à être utilisée.');
+                }
+              };
+            };
+          })
+          .catch(function(err) {
+            console.warn('[PWA] Service Worker registration failed:', err);
+          });
+      });
+    }
+
+    // 2. Discrete iOS Safari Installation Helper
+    (function initIOSInstallGuide() {
+      var ua = window.navigator.userAgent || '';
+      var isIOS = /iPhone|iPad|iPod/i.test(ua);
+      var isStandalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+
+      // Only show if user is on iOS, in Safari browser, not already installed, and hasn't dismissed it recently
+      if (isIOS && !isStandalone) {
+        var dismissed = localStorage.getItem('PERFECT_IOS_INSTALL_DISMISSED');
+        var now = Date.now();
+        if (dismissed && (now - parseInt(dismissed, 10)) < 7 * 24 * 60 * 60 * 1000) {
+          return; // Dismissed within the last 7 days
+        }
+
+        window.addEventListener('DOMContentLoaded', function() {
+          setTimeout(function() {
+            var guide = document.createElement('div');
+            guide.id = 'ios-install-guide';
+            guide.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);width:calc(100% - 32px);max-width:390px;background:#002B49;color:#FFFFFF;padding:16px;border-radius:20px;box-shadow:0 12px 36px rgba(0,0,0,0.4);border:1.5px solid #00A859;z-index:99999;font-family:-apple-system,BlinkMacSystemFont,sans-serif;animation:slideUp 0.4s ease;display:flex;flex-direction:column;gap:10px;';
+            guide.innerHTML = `
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <img src="./src/assets/icon-192.png" style="width:36px;height:36px;border-radius:9px;background:white;padding:2px;" alt="PerfECT">
+                  <div>
+                    <div style="font-weight:700;font-size:13px;color:#FFFFFF;">Installer PerfECT sur iPhone</div>
+                    <div style="font-size:11px;color:#94A3B8;">Accès rapide en plein écran</div>
+                  </div>
+                </div>
+                <button id="close-ios-guide" style="background:transparent;border:none;color:#94A3B8;font-size:18px;cursor:pointer;padding:4px 8px;">✕</button>
+              </div>
+              <div style="font-size:11.5px;color:#E2E8F0;line-height:1.45;background:rgba(255,255,255,0.07);padding:10px 12px;border-radius:12px;">
+                1. Appuyez sur le bouton <strong>Partager</strong> <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#00A859" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;display:inline-block;"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> en bas de Safari.<br>
+                2. Choisissez <strong>« Sur l'écran d'accueil »</strong> 📲.
+              </div>
+              <button id="dismiss-ios-guide-btn" style="background:#00A859;color:#FFFFFF;border:none;border-radius:10px;padding:9px;font-size:12px;font-weight:700;cursor:pointer;text-align:center;">J'ai compris</button>
+            `;
+            document.body.appendChild(guide);
+
+            function dismiss() {
+              localStorage.setItem('PERFECT_IOS_INSTALL_DISMISSED', Date.now().toString());
+              guide.style.opacity = '0';
+              guide.style.transition = 'opacity 0.3s ease';
+              setTimeout(function() { guide.remove(); }, 300);
+            }
+
+            document.getElementById('close-ios-guide').onclick = dismiss;
+            document.getElementById('dismiss-ios-guide-btn').onclick = dismiss;
+          }, 2500); // Appears gently after 2.5 seconds
+        });
+      }
+    })();
+  </script>
 </body>
 </html>
