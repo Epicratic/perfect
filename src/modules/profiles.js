@@ -202,11 +202,13 @@ export function renderProfilesView(appState, translations) {
   });
 
   const realSectorScores = sectorMapKeys.map(s => {
-    const score = sectorCounts[s.key] > 0
-      ? Math.round((sectorTotals[s.key] / sectorCounts[s.key]) * 10) / 10
+    const count = sectorCounts[s.key] || 0;
+    const score = count > 0
+      ? Math.round((sectorTotals[s.key] / count) * 10) / 10
       : (userEvals.length > 0 ? 3.5 : 0.0);
-    return { key: s.key, label: s.label, icon: s.icon, score };
+    return { key: s.key, label: s.label, icon: s.icon, score, count };
   });
+  appState._profileSectorScores = realSectorScores;
 
   // Badges — earned dynamically
   const earnedBadges = [];
@@ -422,12 +424,55 @@ export function renderProfilesView(appState, translations) {
 
   const sectorBarsHTML = isFree ? `
     <div class="card" style="margin-bottom: 16px;">
-      <div style="font-size: 11px; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 12px;">
-        Score Moyen de Qualité par Secteur
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <div style="font-size: 11px; font-weight: 700; color: #64748B; text-transform: uppercase; letter-spacing: 0.5px;">
+          Score Moyen de Qualité par Secteur
+        </div>
+        ${evalCount > 0 ? `
+          <span style="font-size: 10px; font-weight: 700; color: #00A859; background: #E6F7EF; padding: 2px 8px; border-radius: 10px;">
+            ${evalCount} ${evalCount === 1 ? 'avis' : 'avis'}
+          </span>
+        ` : ''}
       </div>
-      <div style="position: relative; height: 200px;">
-        <canvas id="profile-sector-bar-chart"></canvas>
-      </div>
+
+      ${evalCount === 0 ? `
+        <div style="text-align: center; padding: 22px 12px; color: #94A3B8;">
+          <div style="font-size: 28px; margin-bottom: 8px;">📊</div>
+          <div style="font-size: 13px; font-weight: 700; color: #002B49; margin-bottom: 4px;">Aucune évaluation sectorielle</div>
+          <div style="font-size: 11.5px; color: #64748B; line-height: 1.5; max-width: 290px; margin: 0 auto 14px;">
+            Vos scores moyens par secteur apparaîtront ici automatiquement dès vos premières évaluations de services.
+          </div>
+          <button id="btn-profile-go-reporting" style="padding: 8px 16px; background: #00A859; color: white; border: none; border-radius: 10px; font-size: 11.5px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
+            ✍️ Évaluer un service
+          </button>
+        </div>
+      ` : `
+        <div style="position: relative; height: 190px; margin-bottom: 14px;">
+          <canvas id="profile-sector-bar-chart"></canvas>
+        </div>
+
+        <!-- Sector Breakdown Mini-List -->
+        <div class="sector-breakdown-list" style="display: flex; flex-direction: column; gap: 8px; border-top: 1px solid #F1F5F9; padding-top: 12px;">
+          ${realSectorScores.map(s => {
+            const barPct = s.count > 0 ? (s.score / 5) * 100 : 0;
+            const barColor = s.count === 0 ? '#CBD5E1' : (s.score <= 1.0 ? '#DC2626' : (s.score <= 2.0 ? '#FF9F43' : (s.score <= 3.0 ? '#FFB800' : (s.score <= 4.0 ? '#28C76F' : '#00A859'))));
+            return `
+              <div style="display: flex; align-items: center; justify-content: space-between; font-size: 11px;">
+                <div style="display: flex; align-items: center; gap: 6px; min-width: 130px;">
+                  <span>${s.icon}</span>
+                  <span style="font-weight: 600; color: #1E293B;">${s.label}</span>
+                </div>
+                <div style="flex: 1; margin: 0 10px; height: 6px; background: #E2E8F0; border-radius: 3px; overflow: hidden;">
+                  <div style="width: ${barPct}%; height: 100%; background: ${barColor}; border-radius: 3px;"></div>
+                </div>
+                <div style="font-weight: 700; font-size: 11px; min-width: 52px; text-align: right; color: ${s.count > 0 ? barColor : '#94A3B8'};">
+                  ${s.count > 0 ? `${s.score.toFixed(1)} / 5` : '—'}
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `}
     </div>
   ` : '';
 
@@ -1155,6 +1200,96 @@ export function renderProfilesView(appState, translations) {
   `;
 }
 
+// --- Native 2D Canvas Fallback for Profile Sector Bar Chart ---
+function drawFallbackSectorBarChart(canvas, sectorScores) {
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const parent = canvas.parentElement;
+  const width = (parent && parent.clientWidth > 0 ? parent.clientWidth : 320);
+  const height = 190;
+
+  canvas.width = Math.floor(width * dpr);
+  canvas.height = Math.floor(height * dpr);
+  canvas.style.width = width + 'px';
+  canvas.style.height = height + 'px';
+
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, width, height);
+
+  const paddingTop = 22;
+  const paddingBottom = 42;
+  const paddingLeft = 24;
+  const paddingRight = 14;
+  const chartWidth = width - paddingLeft - paddingRight;
+  const chartHeight = height - paddingTop - paddingBottom;
+
+  // Draw grid lines (0 to 5)
+  ctx.strokeStyle = '#F1F5F9';
+  ctx.lineWidth = 1;
+  ctx.fillStyle = '#94A3B8';
+  ctx.font = '9px Inter, sans-serif';
+  ctx.textAlign = 'right';
+
+  for (let i = 0; i <= 5; i++) {
+    const y = paddingTop + chartHeight - (i / 5) * chartHeight;
+    ctx.beginPath();
+    ctx.moveTo(paddingLeft, y);
+    ctx.lineTo(width - paddingRight, y);
+    ctx.stroke();
+    ctx.fillText(i.toString(), paddingLeft - 5, y + 3);
+  }
+
+  // Draw bars
+  const count = sectorScores.length;
+  if (count === 0) return;
+  const barWidth = Math.max(14, Math.min(26, (chartWidth / count) * 0.55));
+  const spacing = chartWidth / count;
+
+  sectorScores.forEach((s, idx) => {
+    const score = Math.max(0, Math.min(5, parseFloat(s.score) || 0));
+    const isEvaluated = Boolean(s.count && s.count > 0);
+    const barHeight = isEvaluated ? (score / 5) * chartHeight : 0;
+    const x = paddingLeft + idx * spacing + (spacing - barWidth) / 2;
+    const y = paddingTop + chartHeight - barHeight;
+
+    const barColor = score <= 1.0 ? '#DC2626' : (score <= 2.0 ? '#FF9F43' : (score <= 3.0 ? '#FFB800' : (score <= 4.0 ? '#28C76F' : '#00A859')));
+
+    if (barHeight > 0) {
+      ctx.fillStyle = barColor;
+      const radius = 4;
+      ctx.beginPath();
+      ctx.moveTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
+      ctx.lineTo(x + barWidth - radius, y);
+      ctx.quadraticCurveTo(x + barWidth, y, x + barWidth, y + radius);
+      ctx.lineTo(x + barWidth, paddingTop + chartHeight);
+      ctx.lineTo(x, paddingTop + chartHeight);
+      ctx.closePath();
+      ctx.fill();
+
+      // Score above bar
+      ctx.fillStyle = '#1E293B';
+      ctx.font = 'bold 8.5px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(score.toFixed(1), x + barWidth / 2, Math.max(paddingTop - 4, y - 4));
+    }
+
+    // Label below axis
+    ctx.fillStyle = '#64748B';
+    ctx.font = '8px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    const shortLabel = s.label.length > 9 ? s.label.substring(0, 8) + '…' : s.label;
+    ctx.save();
+    ctx.translate(x + barWidth / 2, paddingTop + chartHeight + 14);
+    ctx.rotate(-0.35);
+    ctx.fillText(shortLabel, 0, 0);
+    ctx.restore();
+  });
+}
+
 export function attachProfilesEvents(containerEl, appState, renderCallback, onExpertRequest, onNavigate, onLogout) {
   const _currentUser = appState.currentUser || null;
   let profileType = appState.profileType || 'free';
@@ -1554,159 +1689,102 @@ export function attachProfilesEvents(containerEl, appState, renderCallback, onEx
     });
   }
 
-  // --- Sector bar chart (free profile) --- score-based colors ---
+  // --- Sector bar chart (free profile) --- score-based colors & native canvas fallback ---
   if (isFree) {
+    const goReportingBtn = containerEl.querySelector('#btn-profile-go-reporting');
+    if (goReportingBtn) {
+      goReportingBtn.addEventListener('click', () => {
+        if (typeof onNavigate === 'function') {
+          onNavigate('reporting');
+        } else {
+          const reportingTab = document.querySelector('[data-tab="reporting"]');
+          if (reportingTab) reportingTab.click();
+        }
+      });
+    }
+
     const canvas = containerEl.querySelector('#profile-sector-bar-chart');
     if (canvas) {
-      setTimeout(() => {
-        if (!window.Chart) return;
-        if (window.Chart.getChart) {
+      const sectorScores = appState._profileSectorScores || [];
+      if (sectorScores.length > 0) {
+        // 1. Immediate native 2D Canvas fallback (renders instantly without external deps)
+        drawFallbackSectorBarChart(canvas, sectorScores);
+
+        // 2. Interactive Chart.js initialization (upgrades when library is available)
+        const tryInitChartJs = (retries = 4) => {
+          if (!window.Chart) {
+            if (retries > 0) setTimeout(() => tryInitChartJs(retries - 1), 200);
+            return;
+          }
+          if (window.Chart.getChart) {
+            try {
+              const existing = window.Chart.getChart(canvas);
+              if (existing) existing.destroy();
+            } catch (e) {}
+          }
+
+          const scoreBarColor = (s) => {
+            const val = parseFloat(s) || 0;
+            if (val <= 1.0) return '#DC2626';  // Rouge vif (score <= 1.0)
+            if (val <= 2.0) return '#FF9F43';  // Orange (entre 1.0 et 2.0)
+            if (val <= 3.0) return '#FFB800';  // Jaune (entre 2.0 et 3.0)
+            if (val <= 4.0) return '#28C76F';  // Vert clair (entre 3.0 et 4.0)
+            return '#00A859';                 // Vert foncé (> 4.0)
+          };
+
           try {
-            const existing = window.Chart.getChart(canvas);
-            if (existing) existing.destroy();
-          } catch (e) {}
-        }
-
-        // Recompute sector scores from appState directly (freeUserData is out of scope here)
-        const currentUser = appState.currentUser || null;
-        const normEmail = (currentUser && currentUser.email ? currentUser.email : '').toLowerCase().trim();
-        const normName = (currentUser && currentUser.name ? currentUser.name : '').toLowerCase().trim();
-        const userEvalsMap = new Map();
-        (appState.currentUserEvals || []).forEach(e => {
-          if (e) userEvalsMap.set(e.id || `${e.targetEntity}-${e.rating}`, e);
-        });
-        ((appState.data && appState.data.recentEvaluations) || []).forEach(e => {
-          if (e) {
-            const eEmail = (e.authorEmail || '').toLowerCase().trim();
-            const eName = (e.authorName || e.author || '').toLowerCase().trim();
-            if ((normEmail && eEmail === normEmail) || (normName && eName === normName)) {
-              userEvalsMap.set(e.id || `${e.targetEntity}-${e.rating}`, e);
-            }
+            new window.Chart(canvas, {
+              type: 'bar',
+              data: {
+                labels: sectorScores.map(s => s.label),
+                datasets: [{
+                  label: 'Score moyen',
+                  data: sectorScores.map(s => s.count > 0 ? s.score : 0),
+                  backgroundColor: sectorScores.map(s => s.count > 0 ? scoreBarColor(s.score) : '#CBD5E1'),
+                  borderColor: sectorScores.map(s => s.count > 0 ? scoreBarColor(s.score) : '#94A3B8'),
+                  borderWidth: 2,
+                  borderRadius: 6,
+                  borderSkipped: false
+                }]
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                  y: {
+                    min: 0,
+                    max: 5,
+                    ticks: { stepSize: 1, font: { size: 10, family: 'Inter, sans-serif' }, color: '#64748B' },
+                    grid: { color: '#F1F5F9' }
+                  },
+                  x: {
+                    ticks: { font: { size: 9, family: 'Inter, sans-serif' }, color: '#64748B', maxRotation: 35, minRotation: 25 },
+                    grid: { display: false }
+                  }
+                },
+                plugins: {
+                  legend: { display: false },
+                  tooltip: {
+                    callbacks: {
+                      label: ctx => {
+                        const item = sectorScores[ctx.dataIndex];
+                        return item && item.count > 0
+                          ? ` Score: ${item.score.toFixed(1)} / 5 (${item.count} avis)`
+                          : ' Non évalué';
+                      }
+                    }
+                  }
+                },
+                animation: { duration: 600, easing: 'easeOutQuart' }
+              }
+            });
+          } catch (err) {
+            console.warn('[ProfileSectorBar] Chart.js init error, keeping fallback canvas:', err);
           }
-        });
-        const userEvals = Array.from(userEvalsMap.values());
-
-        const sectorMapKeys = [
-          { key: "Governance",         label: "Gouvernance",           keywords: ["gouv", "gov", "just", "parl"] },
-          { key: "SecurityDefense",    label: "Séc. & Défense",        keywords: ["séc", "secu", "def", "polic", "gend"] },
-          { key: "HealthHygiene",      label: "Santé & Hyg.",          keywords: ["sant", "hyg", "med", "pharm", "hopit", "hôpit"] },
-          { key: "InstructionCulture", label: "Instruction",           keywords: ["inst", "cult", "educ", "éduc", "univ", "ecol", "écol"] },
-          { key: "FoodFinance",        label: "Alim. & Finance",       keywords: ["alim", "finan", "banq", "resta", "cafet"] },
-          { key: "HousingTourism",     label: "Logement & Tour.",      keywords: ["log", "tour", "hotel", "hôt"] },
-          { key: "TransportTelco",     label: "Transport & Tél.",      keywords: ["trans", "tel", "tél", "post", "auto"] }
-        ];
-
-        const totals = {}, counts = {};
-        userEvals.forEach(e => {
-          // A. Territorial evaluations cover all 7 sectors via macroScores
-          if (e.isTerritoryRating && e.macroScores) {
-            let ms = e.macroScores;
-            if (typeof ms === 'string') {
-              try { ms = JSON.parse(ms); } catch (_) {}
-            }
-            if (ms) {
-              sectorMapKeys.forEach(sk => {
-                const val = ms[sk.key];
-                if (val !== undefined && val !== null) {
-                  totals[sk.key] = (totals[sk.key] || 0) + (parseFloat(val) || 0);
-                  counts[sk.key] = (counts[sk.key] || 0) + 1;
-                }
-              });
-              return;
-            }
-          }
-          // Fallback from indicatorsData
-          if (e.isTerritoryRating && e.indicatorsData) {
-            let indArr = e._parsedIndicators;
-            if (!indArr) {
-              try { indArr = typeof e.indicatorsData === 'string' ? JSON.parse(e.indicatorsData) : e.indicatorsData; e._parsedIndicators = indArr; } catch (_) {}
-            }
-            if (Array.isArray(indArr) && indArr.length > 0) {
-              sectorMapKeys.forEach(sk => {
-                let mTot = 0, mCnt = 0;
-                for (let i = 0; i < indArr.length; i++) {
-                  if (indArr[i].m === sk.key) { mTot += indArr[i].r; mCnt++; }
-                }
-                if (mCnt > 0) {
-                  totals[sk.key] = (totals[sk.key] || 0) + (mTot / mCnt);
-                  counts[sk.key] = (counts[sk.key] || 0) + 1;
-                }
-              });
-              return;
-            }
-          }
-          // B. Standard citizen evaluation
-          const s = String(e.sectorName || e.macroSector || e.sector || '').toLowerCase();
-          const matched = sectorMapKeys.find(sk =>
-            sk.key.toLowerCase() === s ||
-            s.includes(sk.key.toLowerCase()) ||
-            sk.keywords.some(k => s.includes(k))
-          );
-          if (matched) {
-            totals[matched.key] = (totals[matched.key] || 0) + (parseFloat(e.rating) || 0);
-            counts[matched.key] = (counts[matched.key] || 0) + 1;
-          }
-        });
-
-        const sectorScores = sectorMapKeys.map(sk => ({
-          label: sk.label,
-          score: counts[sk.key] > 0
-            ? Math.round((totals[sk.key] / counts[sk.key]) * 10) / 10
-            : 0
-        }));
-
-        const scoreBarColor = (s) => {
-          const val = parseFloat(s) || 0;
-          if (val <= 1.0) return '#DC2626';  // Rouge vif (score <= 1.0)
-          if (val <= 2.0) return '#FF9F43';  // Orange (entre 1.0 et 2.0)
-          if (val <= 3.0) return '#FFB800';  // Jaune (entre 2.0 et 3.0)
-          if (val <= 4.0) return '#28C76F';  // Vert clair (entre 3.0 et 4.0)
-          return '#00A859';                 // Vert foncé (> 4.0)
         };
 
-        new window.Chart(canvas, {
-          type: 'bar',
-          data: {
-            labels: sectorScores.map(s => s.label),
-            datasets: [{
-              label: 'Score moyen',
-              data: sectorScores.map(s => s.score),
-              backgroundColor: sectorScores.map(s => scoreBarColor(s.score)),
-              borderColor: sectorScores.map(s => scoreBarColor(s.score)),
-              borderWidth: 2,
-              borderRadius: 6,
-              borderSkipped: false
-            }]
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-              y: {
-                min: 0,
-                max: 5,
-                ticks: { stepSize: 1, font: { size: 10, family: 'Inter, sans-serif' }, color: '#64748B' },
-                grid: { color: '#F1F5F9' }
-              },
-              x: {
-                ticks: { font: { size: 9, family: 'Inter, sans-serif' }, color: '#64748B', maxRotation: 35, minRotation: 25 },
-                grid: { display: false }
-              }
-            },
-            plugins: {
-              legend: { display: false },
-              tooltip: {
-                callbacks: {
-                  label: ctx => counts[sectorMapKeys[ctx.dataIndex]?.key] > 0
-                    ? ` Score: ${ctx.raw.toFixed(1)} / 5`
-                    : ' Moyenne nationale (3.5)'
-                }
-              }
-            },
-            animation: { duration: 600, easing: 'easeOutQuart' }
-          }
-        });
-      }, 150);
+        setTimeout(() => tryInitChartJs(4), 100);
+      }
     }
   }
 

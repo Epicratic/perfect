@@ -1,4 +1,4 @@
-﻿# Android build artifacts
+# Android build artifacts
 android/app/build/
 android/.gradle/
 android/build/
@@ -10,7 +10,6 @@ android/app/src/main/assets/
 
 # Node/vendor
 node_modules/
-src/vendor/
 
 # Environment/secrets
 .env

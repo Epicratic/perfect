@@ -80,9 +80,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
   <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet"></noscript>
 
-  <!-- Vendor Scripts (local copies for offline/WebView support) -->
-  <script src="./src/vendor/chart.umd.min.js"></script>
-  <script src="./src/vendor/confetti.browser.min.js"></script>
+  <!-- Vendor Scripts (local copies with CDN fallback for resilience) -->
+  <script src="./src/vendor/chart.umd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js'"></script>
+  <script src="./src/vendor/confetti.browser.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js'"></script>
 
   <!-- App Stylesheet -->
   <link rel="stylesheet" href="./src/style.css">

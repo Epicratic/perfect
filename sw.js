@@ -14,7 +14,9 @@ const PRECACHE_ASSETS = [
   './src/assets/logo.png',
   './src/assets/icon-192.png',
   './src/assets/icon-512.png',
-  './src/assets/apple-touch-icon.png'
+  './src/assets/apple-touch-icon.png',
+  './src/vendor/chart.umd.min.js',
+  './src/vendor/confetti.browser.min.js'
 ];
 
 // Install Event: Cache essential shell assets immediately
