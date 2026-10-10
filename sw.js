@@ -1,7 +1,10 @@
-// PerfECT PWA Service Worker — High-Performance & Seamless Auto-Update
+// PerfECT PWA Service Worker - High-Performance & Seamless Auto-Update
 const CACHE_NAME = 'perfect-pwa-v1.0.0';
 
 // Critical shell assets to pre-cache on install
+// NOTE: Only list assets that actually exist at their paths.
+// Vendor scripts (chart.js, confetti) are loaded via <script> tags in index.html;
+// the sw.js does not pre-cache them since they live at a CDN / are inlined.
 const PRECACHE_ASSETS = [
   './',
   './index.html',
@@ -11,9 +14,7 @@ const PRECACHE_ASSETS = [
   './src/assets/logo.png',
   './src/assets/icon-192.png',
   './src/assets/icon-512.png',
-  './src/assets/apple-touch-icon.png',
-  './src/vendor/chart.umd.min.js',
-  './src/vendor/confetti.browser.min.js'
+  './src/assets/apple-touch-icon.png'
 ];
 
 // Install Event: Cache essential shell assets immediately
@@ -49,14 +50,22 @@ self.addEventListener('fetch', (event) => {
   const request = event.request;
   const url = new URL(request.url);
 
-  // 1. Bypass Firebase, Google APIs, and non-GET requests entirely
-  if (request.method !== 'GET' ||
-      url.hostname.includes('googleapis.com') ||
-      url.hostname.includes('firebaseio.com') ||
-      url.hostname.includes('gstatic.com') ||
-      url.hostname.includes('firebaseapp.com')) {
-    return;
-  }
+  // 1. Bypass Firebase SDK endpoints, Google APIs, and non-GET requests.
+  //    IMPORTANT: We do NOT bypass all of *.firebaseapp.com because Firebase Hosting
+  //    may serve the app itself from a firebaseapp.com subdomain (e.g. perfect-net.firebaseapp.com).
+  //    We only bypass the specific Firebase SDK domains used for Auth & Firestore.
+  if (request.method !== 'GET') return;
+
+  const isBypassedHost =
+    url.hostname === 'www.googleapis.com' ||
+    url.hostname.endsWith('.googleapis.com') ||
+    url.hostname.endsWith('.firebaseio.com') ||
+    url.hostname.endsWith('.gstatic.com') ||
+    // Firebase Auth emulator & identity platform (not the hosting domain)
+    url.hostname === 'identitytoolkit.googleapis.com' ||
+    url.hostname === 'securetoken.googleapis.com';
+
+  if (isBypassedHost) return;
 
   // 2. HTML navigation or app scripts -> Network First (with cache fallback)
   // Ensures updates are picked up immediately when you push new code!

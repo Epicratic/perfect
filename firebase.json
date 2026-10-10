@@ -31,7 +31,7 @@
     ],
     "rewrites": [
       {
-        "source": "**",
+        "source": "!{**/*.js,**/*.json,**/*.css,**/*.png,**/*.jpg,**/*.jpeg,**/*.gif,**/*.svg,**/*.ico,**/*.woff,**/*.woff2,**/*.ttf,**/*.eot,**/*.map}",
         "destination": "/index.html"
       }
     ]
