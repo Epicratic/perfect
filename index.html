@@ -132,22 +132,32 @@
     </div>
   </div>
 
-  <script type="module" src="./src/main.js?v=2.91.0"></script>
+  <script type="module" src="./src/main.js?v=2.92.0"></script>
 
   <!-- PWA Service Worker Registration & iOS Install Prompt -->
   <script>
     // 1. Register Service Worker for offline capabilities & instant updates
     if ('serviceWorker' in navigator) {
+      let refreshing = false;
+      navigator.serviceWorker.addEventListener('controllerchange', function() {
+        if (!refreshing) {
+          refreshing = true;
+          window.location.reload();
+        }
+      });
+
       window.addEventListener('load', function() {
         navigator.serviceWorker.register('./sw.js')
           .then(function(reg) {
             console.log('[PWA] Service Worker registered with scope:', reg.scope);
-            // Check for updates automatically
+            // Proactively check for updates immediately on load
+            reg.update().catch(function() {});
             reg.onupdatefound = function() {
               var installingWorker = reg.installing;
+              if (!installingWorker) return;
               installingWorker.onstatechange = function() {
                 if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                  console.log('[PWA] Nouvelle version disponible, prête à être utilisée.');
+                  console.log('[PWA] Nouvelle version disponible, activation...');
                 }
               };
             };

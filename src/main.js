@@ -9,7 +9,7 @@ import { renderAuthView, attachAuthEvents } from './modules/auth.js';
 import { renderDashboardView, attachDashboardEvents } from './modules/dashboard.js';
 import { renderReportingView, attachReportingEvents } from './modules/reporting.js';
 import { renderAnalyticsView, attachAnalyticsEvents } from './modules/analytics.js';
-import { renderProfilesView, attachProfilesEvents, showChatConversationModal } from './modules/profiles.js';
+import { renderProfilesView, attachProfilesEvents, showChatConversationModal } from './modules/profiles.js?v=2.92.0';
 import { renderPricingView, attachPricingEvents } from './modules/pricing.js';
 import { renderAdminView, attachAdminEvents } from './modules/admin.js';
 import { renderOnboardingView, attachOnboardingEvents } from './modules/onboarding.js';

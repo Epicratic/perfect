@@ -1,5 +1,5 @@
 // PerfECT PWA Service Worker — High-Performance & Seamless Auto-Update
-const CACHE_NAME = 'perfect-pwa-v1.0.0';
+const CACHE_NAME = 'perfect-pwa-v1.2.0';
 
 // Critical shell assets to pre-cache on install
 // NOTE: Only list assets that actually exist at their paths.
@@ -71,7 +71,15 @@ self.addEventListener('fetch', (event) => {
 
   // 2. HTML navigation or app scripts -> Network First (with cache fallback)
   // Ensures updates are picked up immediately when you push new code!
-  if (request.mode === 'navigate' || request.destination === 'document' || request.destination === 'script') {
+  const isScriptOrDoc =
+    request.mode === 'navigate' ||
+    request.destination === 'document' ||
+    request.destination === 'script' ||
+    url.pathname.endsWith('.js') ||
+    url.pathname.endsWith('.html') ||
+    url.pathname.endsWith('.json');
+
+  if (isScriptOrDoc) {
     event.respondWith(
       fetch(request)
         .then((response) => {
