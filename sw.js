@@ -1,4 +1,4 @@
-// PerfECT PWA Service Worker - High-Performance & Seamless Auto-Update
+// PerfECT PWA Service Worker — High-Performance & Seamless Auto-Update
 const CACHE_NAME = 'perfect-pwa-v1.0.0';
 
 // Critical shell assets to pre-cache on install
